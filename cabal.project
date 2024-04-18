@@ -1,0 +1,4 @@
+packages: .
+
+package trace-foreign-calls
+  tests: True

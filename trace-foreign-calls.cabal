@@ -1,0 +1,66 @@
+cabal-version:      3.0
+name:               trace-foreign-calls
+version:            0.1.0
+synopsis:           Source plugin for tracing foreign calls through the eventlog
+description:        The eventlog records when foreign calls are made, but does
+                    not record their names. If you compile your code (and its
+                    dependencies) with this plugin, every foreign call will
+                    wrapped in a function that writes events to the eventlog
+                    before and after the foreign call that include more
+                    information about the function.
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Edsko de Vries
+maintainer:         edsko@well-typed.com
+category:           Development
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+
+common lang
+  build-depends:
+      -- ghc 9.6
+      base >= 4.18 && < 4.19
+  default-language:
+      GHC2021
+  default-extensions:
+      CApiFFI
+  ghc-options:
+      -Wall
+      -Wredundant-constraints
+      -Wprepositive-qualified-module
+      -Widentities
+      -Wunused-packages
+
+library
+  import:
+      lang
+  exposed-modules:
+      Plugin.TraceForeignCalls
+  hs-source-dirs:
+      src
+  build-depends:
+    , ghc >= 9.6 && < 9.7
+
+test-suite test-trace-foreign-calls
+  import:
+      lang
+  type:
+      exitcode-stdio-1.0
+  hs-source-dirs:
+      test
+  include-dirs:
+     test-cbits
+  main-is:
+      Main.hs
+  other-modules:
+      Test.TraceForeignCalls.UsePlugin
+  c-sources:
+      test-cbits/answer.c
+  build-depends:
+      -- internal dependencies
+      trace-foreign-calls
+  build-depends:
+      -- external dependencies
+    , tasty
+    , tasty-hunit
+
