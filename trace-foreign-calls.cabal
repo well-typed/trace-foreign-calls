@@ -24,6 +24,8 @@ common lang
       GHC2021
   default-extensions:
       CApiFFI
+      DerivingStrategies
+      UndecidableInstances
   ghc-options:
       -Wall
       -Wredundant-constraints
@@ -34,12 +36,21 @@ common lang
 library
   import:
       lang
+  other-extensions:
+      TemplateHaskell
   exposed-modules:
       Plugin.TraceForeignCalls
+  other-modules:
+      Plugin.TraceForeignCalls.Instrument
+      Plugin.TraceForeignCalls.Options
+      Plugin.TraceForeignCalls.Util.GHC
   hs-source-dirs:
       src
   build-depends:
-    , ghc >= 9.6 && < 9.7
+    , exceptions       >= 0.10 && < 0.11
+    , ghc              >= 9.6  && < 9.7
+    , template-haskell >= 2.20 && < 2.21
+    , transformers     >= 0.6  && < 0.7
 
 test-suite test-trace-foreign-calls
   import:
@@ -55,7 +66,7 @@ test-suite test-trace-foreign-calls
   other-modules:
       Test.TraceForeignCalls.UsePlugin
   c-sources:
-      test-cbits/answer.c
+      test-cbits/test_cbits.c
   build-depends:
       -- internal dependencies
       trace-foreign-calls
