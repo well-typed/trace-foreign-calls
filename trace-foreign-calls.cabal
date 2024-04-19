@@ -15,6 +15,13 @@ maintainer:         edsko@well-typed.com
 category:           Development
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
+extra-source-files: test-cbits/test_cbits.h
+                    test-cbits/test_cbits.c
+tested-with:        GHC ==9.6.4
+
+source-repository head
+  type:     git
+  location: https://github.com/well-typed/trace-foreign-calls
 
 common lang
   build-depends:
