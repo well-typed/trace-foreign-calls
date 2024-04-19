@@ -55,7 +55,7 @@ library
       src
   build-depends:
     , exceptions       >= 0.10 && < 0.11
-    , ghc              >= 9.6  && < 9.7
+    , ghc >= 9.10
     , template-haskell >= 2.20 && < 2.21
     , transformers     >= 0.6  && < 0.7
 
