@@ -58,6 +58,7 @@ library
     , ghc              >= 9.6  && < 9.7
     , template-haskell >= 2.20 && < 2.21
     , transformers     >= 0.6  && < 0.7
+    , recover-rtti
 
 test-suite test-trace-foreign-calls
   import:

@@ -10,9 +10,17 @@ main = defaultMain $ testGroup "trace-foreign-calls" [
       testCase "answerIO" $ do
         answer <- answerIO
         assertEqual "" 42 $ answer
+    , testCase "answerPure" $ do
+        let answer = answerPure
+        assertEqual "" 42 $ answer
     , testCase "slowAddIO" $ do
         let a = 1_000_000_000
             b = 2_000_000_000
         result <- slowAddIO a b
+        assertEqual "" (a + b) $ result
+    , testCase "slowAddPure" $ do
+        let a = 1_000_000_000
+            b = 2_000_000_000
+        let result = slowAddPure a b
         assertEqual "" (a + b) $ result
     ]
