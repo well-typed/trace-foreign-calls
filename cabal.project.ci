@@ -1,0 +1,5 @@
+packages: .
+
+package trace-foreign-calls
+  tests: True
+  ghc-options: -Werror
