@@ -13,12 +13,12 @@ import GHC.Plugins
 import GHC.Builtin.Names
 import GHC.Data.Bag
 import GHC.Tc.Types
+import GHC.Types.ForeignCall
 import GHC.Types.SourceText
 
 import Plugin.TraceForeignCalls.Instrument
 import Plugin.TraceForeignCalls.Options
 import Plugin.TraceForeignCalls.Util.GHC
-import GHC.Types.ForeignCall
 
 {-------------------------------------------------------------------------------
   Top-level

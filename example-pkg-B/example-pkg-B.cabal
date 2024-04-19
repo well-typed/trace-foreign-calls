@@ -31,6 +31,8 @@ library
       src
   build-depends:
       example-pkg-A >= 0.1 && < 2
+    , bytestring
+    , zlib
 
 test-suite test-B
   import:
