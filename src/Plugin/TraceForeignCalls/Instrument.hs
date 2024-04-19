@@ -22,6 +22,7 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader
 import Debug.Trace qualified
+import qualified Language.Haskell.TH.Syntax as TH
 
 import GHC
 import GHC.Plugins
@@ -115,7 +116,7 @@ data Names = Names {
 
 initNames :: TcM Names
 initNames = do
-    nameTraceEventIO <- resolveTHName 'Debug.Trace.traceEventIO
+    nameTraceEventIO <- resolveTHName (TH.mkNameG TH.VarName "ghc-internal" "GHC.Internal.Debug.Trace" "traceEventIO")
     return Names {
         nameTraceEventIO
       }

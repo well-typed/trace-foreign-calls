@@ -173,7 +173,7 @@ mkWrapper (orig, renamed) sig = do
    return (
        noLocA $
          TypeSig
-           EpAnnNotUsed
+           noAnn
            [wrapperName]
            HsWC {
                hswc_ext  = []
@@ -184,10 +184,10 @@ mkWrapper (orig, renamed) sig = do
               fun_ext     = mkNameSet [unLoc renamed] -- TODO: what is this?
             , fun_id      = wrapperName
             , fun_matches = MG {
-                  mg_ext  = Generated
+                  mg_ext  = Generated OtherExpansion SkipPmc
                 , mg_alts = noLocA . map noLocA $ [
                      Match {
-                         m_ext   = EpAnnNotUsed
+                         m_ext   = noAnn
                        , m_ctxt  = FunRhs {
                              mc_fun        = wrapperName
                            , mc_fixity     = Prefix
@@ -198,7 +198,7 @@ mkWrapper (orig, renamed) sig = do
                              grhssExt        = emptyComments
                            , grhssGRHSs      = map noLocA [
                                  GRHS
-                                   EpAnnNotUsed
+                                   noAnn
                                    [] -- guards
                                    (noLocA $
                                      HsDo
@@ -248,7 +248,7 @@ mkWrapper (orig, renamed) sig = do
             NoExtField
             ( noLocA $
                 HsApp
-                  EpAnnNotUsed
+                  noExtField
                   (noLocA $ HsVar NoExtField (noLocA returnMName))
                   (noLocA $ HsVar NoExtField result)
             )
@@ -262,9 +262,9 @@ mkWrapper (orig, renamed) sig = do
               NoExtField
               ( noLocA $
                   HsApp
-                    EpAnnNotUsed
+                    noExtField
                     (noLocA $ HsVar NoExtField (noLocA traceEventIO))
-                    ( noLocA $ HsLit EpAnnNotUsed $ HsString NoSourceText $
+                    ( noLocA $ HsLit noExtField $ HsString NoSourceText $
                         fsLit $ label ++ wrapperNameString
                     )
               )
