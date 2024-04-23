@@ -18,6 +18,7 @@ import GHC.Types.SourceText
 import Plugin.TraceForeignCalls.Instrument
 import Plugin.TraceForeignCalls.Options
 import Plugin.TraceForeignCalls.Util.GHC
+import GHC.Types.ForeignCall
 
 {-------------------------------------------------------------------------------
   Top-level
@@ -101,11 +102,45 @@ reconstructForeignDecl ReplacedForeignImport {
       , fd_fi     = rfiForeignImport
       }
 
--- | Description of the foreign function to include in the eventlog
---
--- TODO: include more info
-eventLogDescription :: ReplacedForeignImport -> String
-eventLogDescription ReplacedForeignImport{rfiOriginalName} = concat [
+-- | Eventlog description for calling the foreign function
+eventLogCall :: ReplacedForeignImport -> String
+eventLogCall ReplacedForeignImport{
+                        rfiOriginalName
+                      , rfiForeignImport
+                      } = concat [
+      occNameString . nameOccName . unLoc $ rfiOriginalName
+    , " ("
+    , strCallConv
+    , " "
+    , strSafety
+    , " "
+    , show (strHeader ++ strCLabel)
+    , ")"
+    ]
+  where
+    strCallConv, strSafety, strHeader, strCLabel :: String
+    (strCallConv, strSafety, strHeader, strCLabel) =
+        case rfiForeignImport of
+          CImport _sourceText cCallConv safety mHeader cImportSpec -> (
+              showSDocUnsafe $ ppr cCallConv
+            , showSDocUnsafe $ ppr safety
+            , case mHeader of
+                Just (Header _sourceText hdr) -> unpackFS hdr ++ " "
+                Nothing                       -> ""
+            , case cImportSpec of
+                CLabel cLabel ->
+                  unpackFS cLabel
+                CFunction (StaticTarget _sourceText cLabel _ _) ->
+                  unpackFS cLabel
+                CFunction DynamicTarget ->
+                  "<dynamic target>"
+                CWrapper ->
+                  "<wrapper>"
+            )
+
+-- | Eventlog description for the return of the foreign function
+eventLogReturn :: ReplacedForeignImport -> String
+eventLogReturn ReplacedForeignImport{rfiOriginalName} = concat [
       occNameString . nameOccName . unLoc $ rfiOriginalName
     ]
 
@@ -221,15 +256,15 @@ mkWrapperBody ::
 mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
     traceEventIO <- findName nameTraceEventIO
     let callTraceEventIO :: String -> ExprLStmt GhcRn
-        callTraceEventIO label = noLocA $
+        callTraceEventIO arg = noLocA $
             BodyStmt
               NoExtField
               ( noLocA $
                   HsApp
                     EpAnnNotUsed
                     (noLocA $ HsVar NoExtField (noLocA traceEventIO))
-                    ( noLocA $ HsLit EpAnnNotUsed $ HsString NoSourceText $
-                        fsLit $ label ++ eventLogDescription rfi
+                    ( noLocA $ HsLit EpAnnNotUsed $
+                        HsString NoSourceText (fsLit arg)
                     )
               )
               regularBodyStmt
@@ -261,7 +296,8 @@ mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
     result <- uniqInternalName "result"
     let doBlock :: LHsExpr GhcRn
         doBlock = noLocA $ HsDo NoExtField (DoExpr Nothing) $ noLocA [
-            callTraceEventIO "start foreign call "
+            callTraceEventIO $ "trace-foreign-calls: call "
+                            ++ eventLogCall rfi
           , noLocA $
               BindStmt
                 regularBindStmt
@@ -270,7 +306,8 @@ mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
                     Just _  -> callUninstrumented
                     Nothing -> callEvaluate callUninstrumented
                 )
-          , callTraceEventIO "stop foreign call "
+          , callTraceEventIO $ "trace-foreign-calls: return "
+                            ++ eventLogReturn rfi
           , noLocA $
               LastStmt
                 NoExtField
