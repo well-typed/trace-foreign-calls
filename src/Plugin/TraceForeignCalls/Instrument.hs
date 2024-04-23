@@ -21,7 +21,6 @@ import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader
-import Debug.Trace qualified
 
 import GHC
 import GHC.Plugins
@@ -33,6 +32,11 @@ import GHC.Utils.Logger
 
 import Plugin.TraceForeignCalls.Options
 import Plugin.TraceForeignCalls.Util.GHC
+
+-- For name resolution
+import Debug.Trace qualified
+import Control.Exception qualified
+import System.IO.Unsafe qualified
 
 {-------------------------------------------------------------------------------
   Definition
@@ -110,14 +114,20 @@ whenOption_ f = void . whenOption f
 -------------------------------------------------------------------------------}
 
 data Names = Names {
-      nameTraceEventIO :: Name
+      nameTraceEventIO    :: Name
+    , nameEvaluate        :: Name
+    , nameUnsafePerformIO :: Name
     }
 
 initNames :: TcM Names
 initNames = do
-    nameTraceEventIO <- resolveTHName 'Debug.Trace.traceEventIO
+    nameTraceEventIO    <- resolveTHName 'Debug.Trace.traceEventIO
+    nameEvaluate        <- resolveTHName 'Control.Exception.evaluate
+    nameUnsafePerformIO <- resolveTHName 'System.IO.Unsafe.unsafePerformIO
     return Names {
         nameTraceEventIO
+      , nameEvaluate
+      , nameUnsafePerformIO
       }
 
 findName :: (Names -> a) -> Instrument a
