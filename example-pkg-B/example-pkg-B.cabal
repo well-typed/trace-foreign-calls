@@ -1,0 +1,45 @@
+cabal-version:      3.0
+name:               example-pkg-B
+version:            0.1.0
+synopsis:           Example package B
+description:        This is an example of a package with a /dependency/ that
+                    imports a foreign function. We want to be able to enable
+                    the plugin on that dependency, without changing its
+                    cabal file.
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Edsko de Vries
+maintainer:         edsko@well-typed.com
+category:           Development
+build-type:         Simple
+tested-with:        GHC ==9.6.4
+
+common lang
+  ghc-options:
+      -Wall
+  build-depends:
+      base >= 4.18 && < 4.19
+  default-language:
+      GHC2021
+
+library
+  import:
+      lang
+  exposed-modules:
+      ExamplePkgB
+  hs-source-dirs:
+      src
+  build-depends:
+      example-pkg-A >= 0.1 && < 2
+
+test-suite test-B
+  import:
+      lang
+  ghc-options:
+      -main-is TestB
+  type:
+      exitcode-stdio-1.0
+  main-is:
+      test/TestB.hs
+  build-depends:
+      example-pkg-B
