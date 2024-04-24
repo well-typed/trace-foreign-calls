@@ -26,11 +26,12 @@ see something like this:
 
 ```
 ..
-379677: cap 0: running thread 1
-446746: cap 0: trace-foreign-calls: call someForeignFunInA (capi safe "cbits.h xkcdRandomNumber")
-447526: cap 0: stopping thread 1 (making a foreign call)
-447746: cap 0: running thread 1
-451726: cap 0: trace-foreign-calls: return someForeignFunInA
+397876: cap 0: running thread 1
+491265: cap 0: trace-foreign-calls: call someForeignFunInA (capi safe "cbits.h xkcdRandomNumber") at CallStack (from HasCallStack):
+  someForeignFunInA, called at src/ExamplePkgB.hs:11:21 in example-pkg-B-0.1.0-inplace:ExamplePkgB
+491815: cap 0: stopping thread 1 (making a foreign call)
+492165: cap 0: running thread 1
+500755: cap 0: trace-foreign-calls: return someForeignFunInA
 ..
 ```
 
@@ -63,7 +64,7 @@ module header:
 {-# OPTIONS_GHC -fplugin=Plugin.TraceForeignCalls #-}
 ```
 
-## Debugging
+## Plugin options
 
 If you want to see how the plugin transforms your code, you can add a plugin
 option
@@ -71,6 +72,12 @@ option
 ```haskell
 {-# OPTIONS_GHC -fplugin=Plugin.TraceForeignCalls
                 -fplugin-opt Plugin.TraceForeignCalls:dump-generated #-}
+```
+
+You can disable `HasCallStack` support by setting
+
+```
+{-# OPTIONS_GHC -fplugin-opt Plugin.TraceForeignCalls:disable-callstack #-}
 ```
 
 ## Enabling the plugin on all (transitive) dependencies
@@ -150,7 +157,12 @@ Loading static libraries is not supported in this configuration.
 Try using a dynamic library instead.
 ```
 
-Currently the only known workaround is to simply remove this line from the
-`.cabal` file; it does not appear to be necessary on Linux. See
-[crypton#32](https://github.com/kazu-yamamoto/crypton/pull/32) for an example.
+Currently the only known workaround is patch such packages and replace this with
+
+```cabal
+cc-options: -pthread
+```
+
+An example is `crypton`,
+[crypton#33](https://github.com/kazu-yamamoto/crypton/pull/33) for details.
 

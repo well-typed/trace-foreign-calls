@@ -37,6 +37,7 @@ import Plugin.TraceForeignCalls.Util.GHC
 import Debug.Trace qualified
 import Control.Exception qualified
 import System.IO.Unsafe qualified
+import GHC.Stack qualified
 
 {-------------------------------------------------------------------------------
   Definition
@@ -71,12 +72,11 @@ liftTcM = Wrap . lift
 runInstrument :: forall a. [String] -> Instrument a -> TcM a
 runInstrument rawOptions ma = do
     tracerEnvOptions <- parseOptions rawOptions
-    tracerEnvNames   <- initNames
 
     let tracerEnv :: TracerEnv
         tracerEnv = TracerEnv {
               tracerEnvOptions
-            , tracerEnvNames
+            , tracerEnvNames = mkNames
             }
 
     runReaderT (unwrap ma) tracerEnv
@@ -111,24 +111,29 @@ whenOption_ f = void . whenOption f
 
 {-------------------------------------------------------------------------------
   Names
+
+  We set things up in such a way that we only try to resolve a name when we
+  actually use it. We could add some caching, but it really doesn't matter.
 -------------------------------------------------------------------------------}
 
 data Names = Names {
-      nameTraceEventIO    :: Name
-    , nameEvaluate        :: Name
-    , nameUnsafePerformIO :: Name
+      nameTraceEventIO    :: TcM Name
+    , nameEvaluate        :: TcM Name
+    , nameUnsafePerformIO :: TcM Name
+    , nameHasCallStack    :: TcM Name
+    , nameCallStack       :: TcM Name
+    , namePrettyCallStack :: TcM Name
     }
 
-initNames :: TcM Names
-initNames = do
-    nameTraceEventIO    <- resolveTHName 'Debug.Trace.traceEventIO
-    nameEvaluate        <- resolveTHName 'Control.Exception.evaluate
-    nameUnsafePerformIO <- resolveTHName 'System.IO.Unsafe.unsafePerformIO
-    return Names {
-        nameTraceEventIO
-      , nameEvaluate
-      , nameUnsafePerformIO
-      }
+mkNames :: Names
+mkNames = Names {
+      nameTraceEventIO    = resolveTHName 'Debug.Trace.traceEventIO
+    , nameEvaluate        = resolveTHName 'Control.Exception.evaluate
+    , nameUnsafePerformIO = resolveTHName 'System.IO.Unsafe.unsafePerformIO
+    , nameHasCallStack    = resolveTHName ''GHC.Stack.HasCallStack
+    , nameCallStack       = resolveTHName 'GHC.Stack.callStack
+    , namePrettyCallStack = resolveTHName 'GHC.Stack.prettyCallStack
+    }
 
-findName :: (Names -> a) -> Instrument a
-findName f = Wrap $ asks (f . tracerEnvNames)
+findName :: (Names -> TcM Name) -> Instrument Name
+findName f = Wrap $ ReaderT $ f . tracerEnvNames
