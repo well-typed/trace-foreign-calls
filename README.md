@@ -1,8 +1,5 @@
 # Trace foreign calls
 
-> [!WARNING]
-> This plugin is under active development and not yet ready for use.
-
 ## Overview
 
 Suppose we have a `foreign import` such as
@@ -163,6 +160,6 @@ Currently the only known workaround is patch such packages and replace this with
 cc-options: -pthread
 ```
 
-An example is `crypton`,
+An example is `crypton`, see
 [crypton#33](https://github.com/kazu-yamamoto/crypton/pull/33) for details.
 
