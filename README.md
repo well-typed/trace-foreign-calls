@@ -1,5 +1,8 @@
 # Trace foreign calls
 
+> [!WARNING]
+> This plugin is under active development and not yet ready for use.
+
 ## Overview
 
 Suppose we have a `foreign import` such as
@@ -91,8 +94,8 @@ Unfortunately, this is not quite sufficient. The problem is that we have not
 edited the `.cabal` files of all packages and declared `trace-foreign-calls` to
 be a dependency. We _could_ do that, but of course that would be extremely
 laborious. There are some `cabal` tickets open about solving this properly
-([6881](https://github.com/haskell/cabal/issues/6881),
-[7901](https://github.com/haskell/cabal/issues/7901)), but for now we need to
+([#6881](https://github.com/haskell/cabal/issues/6881),
+[#7901](https://github.com/haskell/cabal/issues/7901)), but for now we need to
 use a workaround.
 
 First, we will install the `plugin` in a fresh `cabal` store:
