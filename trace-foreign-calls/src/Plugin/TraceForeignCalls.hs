@@ -103,48 +103,6 @@ reconstructForeignDecl ReplacedForeignImport {
       , fd_fi     = rfiForeignImport
       }
 
--- | Eventlog description for calling the foreign function
-eventLogCall :: ReplacedForeignImport -> String
-eventLogCall ReplacedForeignImport{
-                        rfiOriginalName
-                      , rfiForeignImport
-                      } = concat [
-      occNameString . nameOccName . unLoc $ rfiOriginalName
-    , " ("
-    , strCallConv
-    , " "
-    , strSafety
-    , " "
-    , show (strHeader ++ strCLabel)
-    , ")"
-    ]
-  where
-    strCallConv, strSafety, strHeader, strCLabel :: String
-    (strCallConv, strSafety, strHeader, strCLabel) =
-        case rfiForeignImport of
-          CImport _sourceText cCallConv safety mHeader cImportSpec -> (
-              showSDocUnsafe $ ppr cCallConv
-            , showSDocUnsafe $ ppr safety
-            , case mHeader of
-                Just (Header _sourceText hdr) -> unpackFS hdr ++ " "
-                Nothing                       -> ""
-            , case cImportSpec of
-                CLabel cLabel ->
-                  unpackFS cLabel
-                CFunction (StaticTarget _sourceText cLabel _ _) ->
-                  unpackFS cLabel
-                CFunction DynamicTarget ->
-                  "<dynamic target>"
-                CWrapper ->
-                  "<wrapper>"
-            )
-
--- | Eventlog description for the return of the foreign function
-eventLogReturn :: ReplacedForeignImport -> String
-eventLogReturn ReplacedForeignImport{rfiOriginalName} = concat [
-      occNameString . nameOccName . unLoc $ rfiOriginalName
-    ]
-
 processForeignDecl ::
      LForeignDecl GhcRn
   -> Instrument (Either (LForeignDecl GhcRn) ReplacedForeignImport)
@@ -205,9 +163,15 @@ mkWrapper :: ReplacedForeignImport -> Instrument (LSig GhcRn, LHsBind GhcRn)
 mkWrapper rfi@ReplacedForeignImport {
                   rfiOriginalName
                 , rfiSuffixedName
-                , rfiSigType
+                , rfiSigType = L _ sigType
                 } = do
-    (args, body) <- mkWrapperBody rfi
+    (args, body)    <- mkWrapperBody rfi
+
+    mHasCallStack :: Maybe (LHsType GhcRn) <-
+      whenOption (not . optionsDisableCallStack) $ do
+        hasCallStack <- findName nameHasCallStack
+        return $ noLocA $ HsTyVar EpAnnNotUsed NotPromoted (noLocA hasCallStack)
+
     return (
         noLocA $
           TypeSig
@@ -215,7 +179,19 @@ mkWrapper rfi@ReplacedForeignImport {
             [rfiOriginalName]
             HsWC {
                 hswc_ext  = []
-              , hswc_body = rfiSigType
+              , hswc_body = noLocA $ sigType {
+                    -- Signature as the original import but with HasCallStack
+                    sig_body =
+                      case mHasCallStack of
+                        Nothing ->
+                          sig_body sigType
+                        Just hasCallStack -> noLocA $
+                          HsQualTy {
+                              hst_xqual = NoExtField
+                            , hst_ctxt  = noLocA [hasCallStack]
+                            , hst_body  = sig_body sigType
+                            }
+                  }
               }
       , noLocA $
           FunBind {
@@ -231,7 +207,7 @@ mkWrapper rfi@ReplacedForeignImport {
                             , mc_fixity     = Prefix
                             , mc_strictness = NoSrcStrict
                             }
-                        , m_pats  = map (noLocA . VarPat NoExtField) args
+                        , m_pats  = map namedVarPat args
                         , m_grhss = GRHSs {
                               grhssExt        = emptyComments
                             , grhssGRHSs      = map noLocA [
@@ -253,71 +229,48 @@ mkWrapper rfi@ReplacedForeignImport {
 -- Also returns the arguments to the wrapper
 mkWrapperBody ::
      ReplacedForeignImport
-  -> Instrument ([LIdP GhcRn], LHsExpr GhcRn)
+  -> Instrument ([Name], LHsExpr GhcRn)
 mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
     traceEventIO <- findName nameTraceEventIO
-    let callTraceEventIO :: String -> ExprLStmt GhcRn
+    let callTraceEventIO :: LHsExpr GhcRn -> ExprLStmt GhcRn
         callTraceEventIO arg = noLocA $
             BodyStmt
               NoExtField
-              ( noLocA $
-                  HsApp
-                    EpAnnNotUsed
-                    (noLocA $ HsVar NoExtField (noLocA traceEventIO))
-                    ( noLocA $ HsLit EpAnnNotUsed $
-                        HsString NoSourceText (fsLit arg)
-                    )
-              )
+              (callNamedFn traceEventIO [arg])
               regularBodyStmt
               NoSyntaxExprRn
 
     evaluate <- findName nameEvaluate
     let callEvaluate :: LHsExpr GhcRn -> LHsExpr GhcRn
-        callEvaluate arg = noLocA $
-            HsApp
-              EpAnnNotUsed
-              (noLocA $ HsVar NoExtField (noLocA evaluate))
-              arg
+        callEvaluate arg = callNamedFn evaluate [arg]
 
     unsafePerformIO <- findName nameUnsafePerformIO
     let callUnsafePerformIO :: LHsExpr GhcRn -> LHsExpr GhcRn
-        callUnsafePerformIO arg = noLocA $
-            HsApp
-              EpAnnNotUsed
-              (noLocA $ HsVar NoExtField (noLocA unsafePerformIO))
-              arg
+        callUnsafePerformIO arg = callNamedFn unsafePerformIO [arg]
 
     (args, resultTy) <- uniqArgsFor (sig_body $ unLoc rfiSigType)
     let callUninstrumented :: LHsExpr GhcRn
-        callUninstrumented =
-            mkHsApps
-              (noLocA $ HsVar NoExtField rfiSuffixedName)
-              (map (noLocA . HsVar NoExtField) args)
+        callUninstrumented = callLNamedFn rfiSuffixedName (map namedVar args)
 
-    result <- uniqInternalName "result"
+    result         <- uniqInternalName "result"
+    eventLogCall   <- mkEventLogCall rfi
+    eventLogReturn <- mkEventLogReturn rfi
     let doBlock :: LHsExpr GhcRn
         doBlock = noLocA $ HsDo NoExtField (DoExpr Nothing) $ noLocA [
-            callTraceEventIO $ "trace-foreign-calls: call "
-                            ++ eventLogCall rfi
+            callTraceEventIO eventLogCall
           , noLocA $
               BindStmt
                 regularBindStmt
-                (noLocA $ VarPat NoExtField result)
+                (namedVarPat result)
                 ( case checkIsIO resultTy of
                     Just _  -> callUninstrumented
                     Nothing -> callEvaluate callUninstrumented
                 )
-          , callTraceEventIO $ "trace-foreign-calls: return "
-                            ++ eventLogReturn rfi
+          , callTraceEventIO eventLogReturn
           , noLocA $
               LastStmt
                 NoExtField
-                ( noLocA $
-                    HsApp
-                      EpAnnNotUsed
-                      (noLocA $ HsVar NoExtField (noLocA returnMName))
-                      (noLocA $ HsVar NoExtField result)
-                )
+                (callNamedFn returnMName [namedVar result])
                 Nothing
                 NoSyntaxExprRn
           ]
@@ -330,16 +283,79 @@ mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
       )
 
 {-------------------------------------------------------------------------------
+  Generate eventlog events
+-------------------------------------------------------------------------------}
+
+-- | Eventlog description for calling the foreign function
+mkEventLogCall :: ReplacedForeignImport -> Instrument (LHsExpr GhcRn)
+mkEventLogCall ReplacedForeignImport{
+                        rfiOriginalName
+                      , rfiForeignImport
+                      } = do
+    noCallStack <- asksOption optionsDisableCallStack
+
+    if noCallStack then
+      return $ stringExpr prefix
+    else do
+      callStack        <- findName nameCallStack
+      prettyCalllStack <- findName namePrettyCallStack
+      return $ callNamedFn appendName [
+          stringExpr (prefix ++ " at ")
+        , callNamedFn prettyCalllStack [namedVar callStack]
+        ]
+  where
+    prefix :: String
+    prefix = concat [
+          "trace-foreign-calls: call "
+        , occNameString . nameOccName . unLoc $ rfiOriginalName
+        , " ("
+        , strCallConv
+        , " "
+        , strSafety
+        , " "
+        , show (strHeader ++ strCLabel)
+        , ")"
+        ]
+
+    strCallConv, strSafety, strHeader, strCLabel :: String
+    (strCallConv, strSafety, strHeader, strCLabel) =
+        case rfiForeignImport of
+          CImport _sourceText cCallConv safety mHeader cImportSpec -> (
+              showSDocUnsafe $ ppr cCallConv
+            , showSDocUnsafe $ ppr safety
+            , case mHeader of
+                Just (Header _sourceText hdr) -> unpackFS hdr ++ " "
+                Nothing                       -> ""
+            , case cImportSpec of
+                CLabel cLabel ->
+                  unpackFS cLabel
+                CFunction (StaticTarget _sourceText cLabel _ _) ->
+                  unpackFS cLabel
+                CFunction DynamicTarget ->
+                  "<dynamic target>"
+                CWrapper ->
+                  "<wrapper>"
+            )
+
+-- | Eventlog description for the return of the foreign function
+mkEventLogReturn :: ReplacedForeignImport -> Instrument (LHsExpr GhcRn)
+mkEventLogReturn ReplacedForeignImport{rfiOriginalName} = do
+    return $ stringExpr $ concat [
+        "trace-foreign-calls: return "
+      , occNameString . nameOccName . unLoc $ rfiOriginalName
+      ]
+
+{-------------------------------------------------------------------------------
   Auxiliary
 -------------------------------------------------------------------------------}
 
 trivialBindingGroup :: LHsBind GhcRn -> (RecFlag, Bag (LHsBind GhcRn))
 trivialBindingGroup binding = (NonRecursive, unitBag binding)
 
-uniqInternalName :: String -> Instrument (LIdP GhcRn)
+uniqInternalName :: String -> Instrument Name
 uniqInternalName n = do
    resultUniq <- getUniqueM
-   return $ noLocA $ mkInternalName resultUniq (mkVarOcc n) noSrcSpan
+   return $ mkInternalName resultUniq (mkVarOcc n) noSrcSpan
 
 regularBodyStmt :: SyntaxExprRn
 regularBodyStmt = SyntaxExprRn $ HsVar NoExtField (noLocA thenMName)
@@ -354,13 +370,13 @@ regularBindStmt =
 -- | Create unique name for each argument of the function
 --
 -- Also returns the result type.
-uniqArgsFor :: LHsType GhcRn -> Instrument ([LIdP GhcRn], LHsType GhcRn)
+uniqArgsFor :: LHsType GhcRn -> Instrument ([Name], LHsType GhcRn)
 uniqArgsFor = go []
   where
     go ::
-         [LIdP GhcRn]
+         [Name]
       -> LHsType GhcRn
-      -> Instrument ([LIdP GhcRn], LHsType GhcRn)
+      -> Instrument ([Name], LHsType GhcRn)
     go acc (L _ HsForAllTy{hst_body}) =
         go acc hst_body
     go acc (L _ HsQualTy{hst_body}) =
@@ -382,3 +398,18 @@ checkIsIO (L _ ty) =
 
 emptyWhereClause :: HsLocalBinds GhcRn
 emptyWhereClause = EmptyLocalBinds NoExtField
+
+stringExpr :: String -> LHsExpr GhcRn
+stringExpr = noLocA . HsLit EpAnnNotUsed . HsString NoSourceText . fsLit
+
+callLNamedFn :: LIdP GhcRn -> [LHsExpr GhcRn] -> LHsExpr GhcRn
+callLNamedFn fn args = mkHsApps (noLocA $ HsVar NoExtField fn) args
+
+callNamedFn :: Name -> [LHsExpr GhcRn] -> LHsExpr GhcRn
+callNamedFn = callLNamedFn . noLocA
+
+namedVar :: Name -> LHsExpr GhcRn
+namedVar = noLocA . HsVar NoExtField . noLocA
+
+namedVarPat :: Name -> LPat GhcRn
+namedVarPat = noLocA . VarPat NoExtField . noLocA
