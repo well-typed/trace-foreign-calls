@@ -34,6 +34,7 @@ import Plugin.TraceForeignCalls.Util.GHC
 plugin :: Plugin
 plugin = defaultPlugin {
       renamedResultAction = processRenamed
+    , pluginRecompile     = purePlugin
     }
 
 processRenamed ::
