@@ -1,4 +1,10 @@
-packages: .
+packages: trace-foreign-calls, example-pkg-A, example-pkg-B
 
 package trace-foreign-calls
+  tests: True
+
+package example-pkg-A
+  tests: True
+
+package example-pkg-B
   tests: True

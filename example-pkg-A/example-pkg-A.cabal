@@ -1,0 +1,47 @@
+cabal-version:      3.0
+name:               example-pkg-A
+version:            0.1.0
+synopsis:           Example package A
+description:        This is an example that imports a foreign function. The
+                    function is used in example package B.
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Edsko de Vries
+maintainer:         edsko@well-typed.com
+category:           Development
+build-type:         Simple
+extra-source-files: cbits/cbits.h
+                    cbits/cbits.c
+tested-with:        GHC ==9.6.4
+
+common lang
+  ghc-options:
+      -Wall
+  build-depends:
+      base >= 4.18 && < 4.19
+  default-language:
+      GHC2021
+
+library
+  import:
+      lang
+  exposed-modules:
+      ExamplePkgA
+  hs-source-dirs:
+      src
+  include-dirs:
+      cbits
+  c-sources:
+      cbits/cbits.c
+
+test-suite test-A
+  import:
+      lang
+  ghc-options:
+      -main-is TestA
+  type:
+      exitcode-stdio-1.0
+  main-is:
+      test/TestA.hs
+  build-depends:
+      example-pkg-A

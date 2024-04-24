@@ -1,4 +1,5 @@
--- {-# OPTIONS_GHC -fplugin=Plugin.TraceForeignCalls -fplugin-opt Plugin.TraceForeignCalls:dump-generated #-}
+-- {-# OPTIONS_GHC -fplugin=Plugin.TraceForeignCalls
+--                 -fplugin-opt Plugin.TraceForeignCalls:dump-generated #-}
 {-# OPTIONS_GHC -fplugin=Plugin.TraceForeignCalls #-}
 
 module Test.TraceForeignCalls.UsePlugin (
