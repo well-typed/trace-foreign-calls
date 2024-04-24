@@ -157,7 +157,12 @@ Loading static libraries is not supported in this configuration.
 Try using a dynamic library instead.
 ```
 
-Currently the only known workaround is to simply remove this line from the
-`.cabal` file; it does not appear to be necessary on Linux. See
-[crypton#32](https://github.com/kazu-yamamoto/crypton/pull/32) for an example.
+Currently the only known workaround is patch such packages and replace this with
+
+```cabal
+cc-options: -pthread
+```
+
+An example is `crypton`,
+[crypton#33](https://github.com/kazu-yamamoto/crypton/pull/33) for details.
 
