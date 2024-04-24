@@ -133,3 +133,24 @@ any dependencies (it does not include the hash of the plugin in the hash of the
 packages). So wipe your `cabal-plugin-store` as well as your `dist-newstyle`
 directory each time you update your plugin (another good reason for using a
 separate store for the plugin).
+
+## `libphread`
+
+For reasons currently unclear, enabling the plugin on packages that declare
+
+```cabal
+extra-libraries: pthread
+```
+
+in their `.cabal` file will cause a compilation failure:
+
+```
+<command line>: User-specified static library could not be loaded (/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/libpthread.a)
+Loading static libraries is not supported in this configuration.
+Try using a dynamic library instead.
+```
+
+Currently the only known workaround is to simply remove this line from the
+`.cabal` file; it does not appear to be necessary on Linux. See
+[crypton#32](https://github.com/kazu-yamamoto/crypton/pull/32) for an example.
+
