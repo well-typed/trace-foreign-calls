@@ -10,8 +10,6 @@ module Plugin.TraceForeignCalls.Util.GHC (
   , resolveTHName
   ) where
 
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Reader
 import Data.String
 import Language.Haskell.TH qualified as TH
 
@@ -38,9 +36,6 @@ class (MonadIO m, HasDynFlags m) => HasHscEnv m where
 
 instance HasHscEnv TcM where
   getHscEnv = env_top <$> getEnv
-
-instance HasHscEnv m => HasHscEnv (ReaderT r m) where
-  getHscEnv = lift getHscEnv
 
 {-------------------------------------------------------------------------------
   Internal auxiliary: using the 'HscEnv'

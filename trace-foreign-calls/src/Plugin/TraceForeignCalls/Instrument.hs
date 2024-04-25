@@ -18,15 +18,11 @@ module Plugin.TraceForeignCalls.Instrument (
 
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Reader
 
 import GHC
-import GHC.Plugins
+import GHC.Plugins hiding (getHscEnv)
 
-import GHC.Driver.Hooks
 import GHC.Tc.Types
-import GHC.Types.TyThing
 import GHC.Utils.Logger
 
 import Plugin.TraceForeignCalls.Options
@@ -47,22 +43,13 @@ data TracerEnv = TracerEnv {
     , tracerEnvNames   :: Names
     }
 
-newtype Instrument a = Wrap { unwrap :: ReaderT TracerEnv TcM a }
-  deriving newtype
-    ( -- base
-      Functor
-    , Applicative
-    , Monad
-    , MonadIO
-      -- ghc
-    , HasDynFlags
-    , MonadThings
-      -- trace-foreign-calls
-    , HasHscEnv
-    )
+newtype Instrument a = Wrap { unwrap :: TracerEnv -> TcM a }
 
 liftTcM :: TcM a -> Instrument a
-liftTcM = Wrap . lift
+liftTcM = Wrap . const
+
+getTracerEnv :: Instrument TracerEnv
+getTracerEnv = Wrap return
 
 runInstrument :: forall a. [String] -> Instrument a -> TcM a
 runInstrument rawOptions ma = do
@@ -74,16 +61,27 @@ runInstrument rawOptions ma = do
             , tracerEnvNames = mkNames
             }
 
-    runReaderT (unwrap ma) tracerEnv
+    unwrap ma tracerEnv
 
 {-------------------------------------------------------------------------------
-  Manual instances
-
-  Unfortunately many classes in GHC do not provide instances for transformers.
+  Instances
 -------------------------------------------------------------------------------}
 
-instance HasHooks    Instrument where getHooks         = liftTcM getHooks
-instance HasModule   Instrument where getModule        = liftTcM getModule
+instance Functor Instrument where
+  fmap = liftM
+
+instance Applicative Instrument where
+  pure x = Wrap $ \_env -> return x
+  (<*>)  = ap
+
+instance Monad Instrument where
+  x >>= f = Wrap $ \env -> unwrap x env >>= \a -> unwrap (f a) env
+
+instance MonadIO Instrument where
+  liftIO = liftTcM  . liftIO
+
+instance HasDynFlags Instrument where getDynFlags      = liftTcM getDynFlags
+instance HasHscEnv   Instrument where getHscEnv        = liftTcM getHscEnv
 instance HasLogger   Instrument where getLogger        = liftTcM getLogger
 instance MonadUnique Instrument where getUniqueSupplyM = liftTcM getUniqueSupplyM
 
@@ -92,7 +90,7 @@ instance MonadUnique Instrument where getUniqueSupplyM = liftTcM getUniqueSupply
 -------------------------------------------------------------------------------}
 
 asksOption :: (Options -> a) -> Instrument a
-asksOption f = Wrap $ asks (f . tracerEnvOptions)
+asksOption f = f . tracerEnvOptions <$> getTracerEnv
 
 whenOption :: (Options -> Bool) -> Instrument a -> Instrument (Maybe a)
 whenOption f ma = do
@@ -131,4 +129,4 @@ mkNames = Names {
     }
 
 findName :: (Names -> TcM Name) -> Instrument Name
-findName f = Wrap $ ReaderT $ f . tracerEnvNames
+findName f = Wrap $ f . tracerEnvNames

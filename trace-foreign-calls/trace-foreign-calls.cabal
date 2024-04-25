@@ -54,9 +54,10 @@ library
   hs-source-dirs:
       src
   build-depends:
+      -- dependencies intentionally kept at a minimum
+      -- (we want to be able to build the boot libs with this plugin)
     , ghc              >= 9.6  && < 9.7
     , template-haskell >= 2.20 && < 2.21
-    , transformers     >= 0.6  && < 0.7
 
 test-suite test-trace-foreign-calls
   import:
