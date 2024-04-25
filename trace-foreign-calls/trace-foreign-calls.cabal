@@ -25,14 +25,9 @@ source-repository head
 
 common lang
   build-depends:
-      -- ghc 9.6
       base >= 4.18 && < 4.19
   default-language:
       GHC2021
-  default-extensions:
-      CApiFFI
-      DerivingStrategies
-      UndecidableInstances
   ghc-options:
       -Wall
       -Wredundant-constraints
@@ -43,8 +38,6 @@ common lang
 library
   import:
       lang
-  other-extensions:
-      TemplateHaskell
   exposed-modules:
       Plugin.TraceForeignCalls
   other-modules:
@@ -54,10 +47,9 @@ library
   hs-source-dirs:
       src
   build-depends:
-    , exceptions       >= 0.10 && < 0.11
-    , ghc              >= 9.6  && < 9.7
-    , template-haskell >= 2.20 && < 2.21
-    , transformers     >= 0.6  && < 0.7
+      -- dependencies intentionally kept at a minimum
+      -- (we want to be able to build the boot libs with this plugin)
+    , ghc >= 9.6 && < 9.7
 
 test-suite test-trace-foreign-calls
   import:

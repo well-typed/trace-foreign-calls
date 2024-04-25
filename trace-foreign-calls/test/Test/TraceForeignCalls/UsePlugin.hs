@@ -1,3 +1,4 @@
+{-# LANGUAGE CApiFFI #-}
 {-# OPTIONS_GHC -fplugin=Plugin.TraceForeignCalls
                 -fplugin-opt Plugin.TraceForeignCalls:dump-generated
 #-}
