@@ -17,7 +17,6 @@ module Plugin.TraceForeignCalls.Instrument (
   ) where
 
 import Control.Monad
-import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader
@@ -55,10 +54,6 @@ newtype Instrument a = Wrap { unwrap :: ReaderT TracerEnv TcM a }
     , Applicative
     , Monad
     , MonadIO
-      -- exceptions
-    , MonadThrow
-    , MonadCatch
-    , MonadMask
       -- ghc
     , HasDynFlags
     , MonadThings

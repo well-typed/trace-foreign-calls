@@ -162,4 +162,3 @@ cc-options: -pthread
 
 An example is `crypton`, see
 [crypton#33](https://github.com/kazu-yamamoto/crypton/pull/33) for details.
-
