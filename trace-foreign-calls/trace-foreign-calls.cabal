@@ -38,8 +38,6 @@ common lang
 library
   import:
       lang
-  other-extensions:
-      TemplateHaskell
   exposed-modules:
       Plugin.TraceForeignCalls
   other-modules:
@@ -51,8 +49,7 @@ library
   build-depends:
       -- dependencies intentionally kept at a minimum
       -- (we want to be able to build the boot libs with this plugin)
-    , ghc              >= 9.6  && < 9.7
-    , template-haskell >= 2.20 && < 2.21
+    , ghc >= 9.6 && < 9.7
 
 test-suite test-trace-foreign-calls
   import:

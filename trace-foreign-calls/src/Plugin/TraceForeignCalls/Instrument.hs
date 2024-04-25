@@ -1,5 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 -- | Instrumentation monad
 --
 -- Intended for unqualified import.
@@ -27,12 +25,6 @@ import GHC.Utils.Logger
 
 import Plugin.TraceForeignCalls.Options
 import Plugin.TraceForeignCalls.Util.GHC
-
--- For name resolution
-import Debug.Trace qualified
-import Control.Exception qualified
-import System.IO.Unsafe qualified
-import GHC.Stack qualified
 
 {-------------------------------------------------------------------------------
   Definition
@@ -120,12 +112,12 @@ data Names = Names {
 
 mkNames :: Names
 mkNames = Names {
-      nameTraceEventIO    = resolveTHName 'Debug.Trace.traceEventIO
-    , nameEvaluate        = resolveTHName 'Control.Exception.evaluate
-    , nameUnsafePerformIO = resolveTHName 'System.IO.Unsafe.unsafePerformIO
-    , nameHasCallStack    = resolveTHName ''GHC.Stack.HasCallStack
-    , nameCallStack       = resolveTHName 'GHC.Stack.callStack
-    , namePrettyCallStack = resolveTHName 'GHC.Stack.prettyCallStack
+      nameTraceEventIO    = resolveVarName "Debug.Trace"     "traceEventIO"
+    , nameEvaluate        = resolveVarName "GHC.IO"          "evaluate"
+    , nameUnsafePerformIO = resolveVarName "GHC.IO.Unsafe"   "unsafePerformIO"
+    , nameHasCallStack    = resolveTcName  "GHC.Stack.Types" "HasCallStack"
+    , nameCallStack       = resolveVarName "GHC.Stack"       "callStack"
+    , namePrettyCallStack = resolveVarName "GHC.Exception"   "prettyCallStack"
     }
 
 findName :: (Names -> TcM Name) -> Instrument Name
