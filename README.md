@@ -154,11 +154,16 @@ Loading static libraries is not supported in this configuration.
 Try using a dynamic library instead.
 ```
 
-Currently the only known workaround is patch such packages and replace this with
+Currently the only known workaround is patch such packages; it many cases it may
+be possible to simply remove `pthread` from `extra-libraries`; alternatively, it
+may be possible to instead use `cc-options`:
 
 ```cabal
 cc-options: -pthread
 ```
 
-An example is `crypton`, see
-[crypton#33](https://github.com/kazu-yamamoto/crypton/pull/33) for details.
+An example used to be `crypton`; see
+[crypton#32](https://github.com/kazu-yamamoto/crypton/pull/32) and
+[crypton#33](https://github.com/kazu-yamamoto/crypton/pull/33) for examples of
+both of these options, and see https://stackoverflow.com/a/62561519/742991 for a
+discussion of the difference between `-lphread` and `-pthread`.
