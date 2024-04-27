@@ -1,0 +1,13 @@
+packages: trace-foreign-calls, example-pkg-A, example-pkg-B
+
+package trace-foreign-calls
+  tests: True
+  ghc-options: -Werror
+
+package example-pkg-A
+  tests: True
+  ghc-options: -Werror
+
+package example-pkg-B
+  tests: True
+  ghc-options: -Werror

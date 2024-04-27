@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Plugin.TraceForeignCalls (plugin) where
@@ -198,7 +199,12 @@ mkWrapper rfi@ReplacedForeignImport {
                fun_ext     = mkNameSet [unLoc rfiSuffixedName] -- TODO: what is this?
              , fun_id      = rfiOriginalName
              , fun_matches = MG {
+#if __GLASGOW_HASKELL__ == 906
                    mg_ext  = Generated
+#endif
+#if __GLASGOW_HASKELL__ >= 908
+                   mg_ext  = Generated SkipPmc
+#endif
                  , mg_alts = noLocA . map noLocA $ [
                       Match {
                           m_ext   = EpAnnNotUsed
