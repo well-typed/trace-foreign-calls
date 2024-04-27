@@ -19,6 +19,7 @@ extra-source-files: test-cbits/test_cbits.h
                     test-cbits/test_cbits.c
 tested-with:        GHC ==9.6.4
                     GHC ==9.8.2
+                    GHC ==9.10.1
 
 source-repository head
   type:     git
@@ -26,7 +27,7 @@ source-repository head
 
 common lang
   build-depends:
-      base >= 4.18 && < 4.20
+      base >= 4.18 && < 4.21
   default-language:
       GHC2021
   ghc-options:
@@ -45,12 +46,13 @@ library
       Plugin.TraceForeignCalls.Instrument
       Plugin.TraceForeignCalls.Options
       Plugin.TraceForeignCalls.Util.GHC
+      Plugin.TraceForeignCalls.Util.Shim
   hs-source-dirs:
       src
   build-depends:
       -- dependencies intentionally kept at a minimum
       -- (we want to be able to build the boot libs with this plugin)
-    , ghc >= 9.6 && < 9.9
+    , ghc >= 9.6 && < 9.11
 
 test-suite test-trace-foreign-calls
   import:

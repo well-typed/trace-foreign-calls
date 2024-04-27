@@ -101,13 +101,12 @@ printSimpleWarning l doc = do
   modules.
 -------------------------------------------------------------------------------}
 
-resolveVarName :: String -> String -> TcM Name
+resolveVarName :: Module -> String -> TcM Name
 resolveVarName = resolveName mkVarOcc
 
-resolveTcName :: String -> String -> TcM Name
+resolveTcName :: Module -> String -> TcM Name
 resolveTcName = resolveName mkTcOcc
 
 -- | Internal generalization
-resolveName :: (String -> OccName) -> String -> String -> TcM Name
-resolveName f modl name =
-    lookupOccRn $ Orig (mkModule baseUnit (mkModuleName modl)) (f name)
+resolveName :: (String -> OccName) -> Module -> String -> TcM Name
+resolveName f modl name = lookupOccRn $ Orig modl (f name)

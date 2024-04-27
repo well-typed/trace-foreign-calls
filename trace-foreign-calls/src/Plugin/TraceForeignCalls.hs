@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Plugin.TraceForeignCalls (plugin) where
@@ -20,6 +19,7 @@ import GHC.Types.SourceText
 import Plugin.TraceForeignCalls.Instrument
 import Plugin.TraceForeignCalls.Options
 import Plugin.TraceForeignCalls.Util.GHC
+import Plugin.TraceForeignCalls.Util.Shim
 
 {-------------------------------------------------------------------------------
   Top-level
@@ -97,8 +97,8 @@ reconstructForeignDecl ReplacedForeignImport {
                          , rfiSigType
                          , rfiForeignImport
                          } =
-    noLocA $ ForeignImport{
-        fd_i_ext  = NoExtField
+    noLocValue $ ForeignImport{
+        fd_i_ext  = noValue
       , fd_name   = rfiSuffixedName
       , fd_sig_ty = rfiSigType
       , fd_fi     = rfiForeignImport
@@ -171,43 +171,38 @@ mkWrapper rfi@ReplacedForeignImport {
     mHasCallStack :: Maybe (LHsType GhcRn) <-
       whenOption (not . optionsDisableCallStack) $ do
         hasCallStack <- findName nameHasCallStack
-        return $ noLocA $ HsTyVar EpAnnNotUsed NotPromoted (noLocA hasCallStack)
+        return $ noLocValue $ HsTyVar noValue NotPromoted (noLocValue hasCallStack)
 
     return (
-        noLocA $
+        noLocValue $
           TypeSig
-            EpAnnNotUsed
+            noValue
             [rfiOriginalName]
             HsWC {
                 hswc_ext  = []
-              , hswc_body = noLocA $ sigType {
+              , hswc_body = noLocValue $ sigType {
                     -- Signature as the original import but with HasCallStack
                     sig_body =
                       case mHasCallStack of
                         Nothing ->
                           sig_body sigType
-                        Just hasCallStack -> noLocA $
+                        Just hasCallStack -> noLocValue $
                           HsQualTy {
-                              hst_xqual = NoExtField
-                            , hst_ctxt  = noLocA [hasCallStack]
+                              hst_xqual = noValue
+                            , hst_ctxt  = noLocValue [hasCallStack]
                             , hst_body  = sig_body sigType
                             }
                   }
               }
-      , noLocA $
+      , noLocValue $
           FunBind {
                fun_ext     = mkNameSet [unLoc rfiSuffixedName] -- TODO: what is this?
              , fun_id      = rfiOriginalName
              , fun_matches = MG {
-#if __GLASGOW_HASKELL__ == 906
-                   mg_ext  = Generated
-#endif
-#if __GLASGOW_HASKELL__ >= 908
-                   mg_ext  = Generated SkipPmc
-#endif
-                 , mg_alts = noLocA . map noLocA $ [
+                   mg_ext  = originGenerated
+                 , mg_alts = noLocValue . map noLocValue $ [
                       Match {
-                          m_ext   = EpAnnNotUsed
+                          m_ext   = noValue
                         , m_ctxt  = FunRhs {
                               mc_fun        = rfiOriginalName
                             , mc_fixity     = Prefix
@@ -216,9 +211,9 @@ mkWrapper rfi@ReplacedForeignImport {
                         , m_pats  = map namedVarPat args
                         , m_grhss = GRHSs {
                               grhssExt        = emptyComments
-                            , grhssGRHSs      = map noLocA [
+                            , grhssGRHSs      = map noLocValue [
                                   GRHS
-                                    EpAnnNotUsed
+                                    noValue
                                     [] -- guards
                                     body
                                 ]
@@ -239,9 +234,9 @@ mkWrapperBody ::
 mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
     traceEventIO <- findName nameTraceEventIO
     let callTraceEventIO :: LHsExpr GhcRn -> ExprLStmt GhcRn
-        callTraceEventIO arg = noLocA $
+        callTraceEventIO arg = noLocValue $
             BodyStmt
-              NoExtField
+              noValue
               (callNamedFn traceEventIO [arg])
               regularBodyStmt
               NoSyntaxExprRn
@@ -262,9 +257,9 @@ mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
     eventLogCall   <- mkEventLogCall rfi
     eventLogReturn <- mkEventLogReturn rfi
     let doBlock :: LHsExpr GhcRn
-        doBlock = noLocA $ HsDo NoExtField (DoExpr Nothing) $ noLocA [
+        doBlock = noLocValue $ HsDo noValue (DoExpr Nothing) $ noLocValue [
             callTraceEventIO eventLogCall
-          , noLocA $
+          , noLocValue $
               BindStmt
                 regularBindStmt
                 (namedVarPat result)
@@ -273,9 +268,9 @@ mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
                     Nothing -> callEvaluate callUninstrumented
                 )
           , callTraceEventIO eventLogReturn
-          , noLocA $
+          , noLocValue $
               LastStmt
-                NoExtField
+                noValue
                 (callNamedFn returnMName [namedVar result])
                 Nothing
                 NoSyntaxExprRn
@@ -364,12 +359,12 @@ uniqInternalName n = do
    return $ mkInternalName resultUniq (mkVarOcc n) noSrcSpan
 
 regularBodyStmt :: SyntaxExprRn
-regularBodyStmt = SyntaxExprRn $ HsVar NoExtField (noLocA thenMName)
+regularBodyStmt = SyntaxExprRn $ HsVar noValue (noLocValue thenMName)
 
 regularBindStmt :: XBindStmtRn
 regularBindStmt =
     XBindStmtRn {
-        xbsrn_bindOp = SyntaxExprRn $ HsVar NoExtField (noLocA bindMName)
+        xbsrn_bindOp = SyntaxExprRn $ HsVar noValue (noLocValue bindMName)
       , xbsrn_failOp = Nothing
       }
 
@@ -403,19 +398,19 @@ checkIsIO (L _ ty) =
         Nothing
 
 emptyWhereClause :: HsLocalBinds GhcRn
-emptyWhereClause = EmptyLocalBinds NoExtField
+emptyWhereClause = EmptyLocalBinds noValue
 
 stringExpr :: String -> LHsExpr GhcRn
-stringExpr = noLocA . HsLit EpAnnNotUsed . HsString NoSourceText . fsLit
+stringExpr = noLocValue . HsLit noValue . HsString NoSourceText . fsLit
 
 callLNamedFn :: LIdP GhcRn -> [LHsExpr GhcRn] -> LHsExpr GhcRn
-callLNamedFn fn args = mkHsApps (noLocA $ HsVar NoExtField fn) args
+callLNamedFn fn args = mkHsApps (noLocValue $ HsVar noValue fn) args
 
 callNamedFn :: Name -> [LHsExpr GhcRn] -> LHsExpr GhcRn
-callNamedFn = callLNamedFn . noLocA
+callNamedFn = callLNamedFn . noLocValue
 
 namedVar :: Name -> LHsExpr GhcRn
-namedVar = noLocA . HsVar NoExtField . noLocA
+namedVar = noLocValue . HsVar noValue . noLocValue
 
 namedVarPat :: Name -> LPat GhcRn
-namedVarPat = noLocA . VarPat NoExtField . noLocA
+namedVarPat = noLocValue . VarPat noValue . noLocValue
