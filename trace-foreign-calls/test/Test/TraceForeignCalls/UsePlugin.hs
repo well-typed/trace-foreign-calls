@@ -2,8 +2,6 @@
 {-# OPTIONS_GHC -fplugin=Plugin.TraceForeignCalls
                 -fplugin-opt Plugin.TraceForeignCalls:dump-generated
 #-}
---                -fplugin-opt Plugin.TraceForeignCalls:disable-callstack
--- {-# OPTIONS_GHC -fplugin=Plugin.TraceForeignCalls #-}
 
 module Test.TraceForeignCalls.UsePlugin (
     -- * IO functions
