@@ -37,7 +37,7 @@ instance NoValue NoExtField where
 instance NoValue SrcSpan where
   noValue = noSrcSpan
 
-#if __GLASGOW_HASKELL__ < 910
+#if !MIN_VERSION_ghc(9,9,0)
 
 instance NoValue a => NoValue (SrcSpanAnn' a) where
   noValue = SrcSpanAnn noValue noValue
@@ -63,13 +63,13 @@ instance NoValue [AddEpAnn] where
 -------------------------------------------------------------------------------}
 
 originGenerated :: Origin
-#if __GLASGOW_HASKELL__ == 906
+#if MIN_VERSION_ghc(9,5,0) && !MIN_VERSION_ghc(9,7,0)
 originGenerated = Generated
 #endif
-#if __GLASGOW_HASKELL__ == 908
+#if MIN_VERSION_ghc(9,7,0) && !MIN_VERSION_ghc(9,9,0)
 originGenerated = Generated SkipPmc
 #endif
-#if __GLASGOW_HASKELL__ >= 910
+#if MIN_VERSION_ghc(9,9,0)
 originGenerated = Generated OtherExpansion SkipPmc
 #endif
 
@@ -79,7 +79,7 @@ originGenerated = Generated OtherExpansion SkipPmc
 
 modlTraceEventIO :: Module
 modlTraceEventIO =
-#if __GLASGOW_HASKELL__ < 910
+#if !MIN_VERSION_ghc(9,9,0)
     mkModule baseUnit $ mkModuleName "Debug.Trace"
 #else
     mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.Debug.Trace"
@@ -87,7 +87,7 @@ modlTraceEventIO =
 
 modlEvaluate :: Module
 modlEvaluate =
-#if __GLASGOW_HASKELL__ < 910
+#if !MIN_VERSION_ghc(9,9,0)
     mkModule baseUnit $ mkModuleName "GHC.IO"
 #else
     mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.IO"
@@ -95,7 +95,7 @@ modlEvaluate =
 
 modlUnsafePerformIO :: Module
 modlUnsafePerformIO =
-#if __GLASGOW_HASKELL__ < 910
+#if !MIN_VERSION_ghc(9,9,0)
     mkModule baseUnit $ mkModuleName "GHC.IO.Unsafe"
 #else
     mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.IO.Unsafe"
@@ -103,7 +103,7 @@ modlUnsafePerformIO =
 
 modlHasCallStack :: Module
 modlHasCallStack =
-#if __GLASGOW_HASKELL__ < 910
+#if !MIN_VERSION_ghc(9,9,0)
     mkModule baseUnit $ mkModuleName  "GHC.Stack.Types"
 #else
     mkModule ghcInternalUnit $ mkModuleName  "GHC.Internal.Stack.Types"
@@ -111,7 +111,7 @@ modlHasCallStack =
 
 modlCallStack :: Module
 modlCallStack =
-#if __GLASGOW_HASKELL__ < 910
+#if !MIN_VERSION_ghc(9,9,0)
     mkModule baseUnit $ mkModuleName "GHC.Stack"
 #else
     mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.Stack"
@@ -119,7 +119,7 @@ modlCallStack =
 
 modlPrettyCallStack :: Module
 modlPrettyCallStack =
-#if __GLASGOW_HASKELL__ < 910
+#if !MIN_VERSION_ghc(9,9,0)
     mkModule baseUnit $ mkModuleName "GHC.Exception"
 #else
     mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.Stack"
