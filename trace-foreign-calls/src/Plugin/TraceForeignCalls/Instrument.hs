@@ -25,6 +25,7 @@ import GHC.Utils.Logger
 
 import Plugin.TraceForeignCalls.Options
 import Plugin.TraceForeignCalls.Util.GHC
+import Plugin.TraceForeignCalls.Util.Shim
 
 {-------------------------------------------------------------------------------
   Definition
@@ -112,12 +113,12 @@ data Names = Names {
 
 mkNames :: Names
 mkNames = Names {
-      nameTraceEventIO    = resolveVarName "Debug.Trace"     "traceEventIO"
-    , nameEvaluate        = resolveVarName "GHC.IO"          "evaluate"
-    , nameUnsafePerformIO = resolveVarName "GHC.IO.Unsafe"   "unsafePerformIO"
-    , nameHasCallStack    = resolveTcName  "GHC.Stack.Types" "HasCallStack"
-    , nameCallStack       = resolveVarName "GHC.Stack"       "callStack"
-    , namePrettyCallStack = resolveVarName "GHC.Exception"   "prettyCallStack"
+      nameTraceEventIO    = resolveVarName modlTraceEventIO    "traceEventIO"
+    , nameEvaluate        = resolveVarName modlEvaluate        "evaluate"
+    , nameUnsafePerformIO = resolveVarName modlUnsafePerformIO "unsafePerformIO"
+    , nameHasCallStack    = resolveTcName  modlHasCallStack    "HasCallStack"
+    , nameCallStack       = resolveVarName modlCallStack       "callStack"
+    , namePrettyCallStack = resolveVarName modlPrettyCallStack "prettyCallStack"
     }
 
 findName :: (Names -> TcM Name) -> Instrument Name
