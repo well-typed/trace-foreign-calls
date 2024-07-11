@@ -10,11 +10,13 @@ module Plugin.TraceForeignCalls.Util.Shim (
   , originGenerated
     -- * Name resolution
   , modlCallStack
-  , modlEvaluate
+  , modlSeq
   , modlHasCallStack
   , modlPrettyCallStack
-  , modlTraceEventIO
-  , modlUnsafePerformIO
+  , modlTraceEvent
+  , modlRunRW
+  , modlNoDuplicate
+  , modlGetCurrentCCS
   ) where
 
 import GHC
@@ -53,8 +55,13 @@ instance NoAnn ann => NoValue (EpAnn ann) where
 instance NoValue AnnSig where
   noValue = noAnn
 
+#if MIN_VERSION_ghc(9,12,0)
+instance NoValue EpaLocation where
+  noValue = noAnn
+#else
 instance NoValue [AddEpAnn] where
   noValue = []
+#endif
 
 #endif
 
@@ -77,29 +84,21 @@ originGenerated = Generated OtherExpansion SkipPmc
   Defining modules for various symbols
 -------------------------------------------------------------------------------}
 
-modlTraceEventIO :: Module
-modlTraceEventIO =
-#if !MIN_VERSION_ghc(9,9,0)
-    mkModule baseUnit $ mkModuleName "Debug.Trace"
+modlTraceEvent :: Module
+modlTraceEvent = mkModule primUnit $ mkModuleName "GHC.Prim"
+
+modlSeq :: Module
+#if MIN_VERSION_ghc(9,12,0)
+modlSeq = mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.IO"
 #else
-    mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.Debug.Trace"
+modlSeq = mkModule primUnit $ mkModuleName "GHC.Prim"
 #endif
 
-modlEvaluate :: Module
-modlEvaluate =
-#if !MIN_VERSION_ghc(9,9,0)
-    mkModule baseUnit $ mkModuleName "GHC.IO"
-#else
-    mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.IO"
-#endif
+modlRunRW :: Module
+modlRunRW = mkModule primUnit $ mkModuleName "GHC.Magic"
 
-modlUnsafePerformIO :: Module
-modlUnsafePerformIO =
-#if !MIN_VERSION_ghc(9,9,0)
-    mkModule baseUnit $ mkModuleName "GHC.IO.Unsafe"
-#else
-    mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.IO.Unsafe"
-#endif
+modlNoDuplicate :: Module
+modlNoDuplicate = mkModule primUnit $ mkModuleName "GHC.Prim"
 
 modlHasCallStack :: Module
 modlHasCallStack =
@@ -124,4 +123,8 @@ modlPrettyCallStack =
 #else
     mkModule ghcInternalUnit $ mkModuleName "GHC.Internal.Stack"
 #endif
+
+modlGetCurrentCCS :: Module
+modlGetCurrentCCS =
+    mkModule primUnit $ mkModuleName "GHC.Prim"
 

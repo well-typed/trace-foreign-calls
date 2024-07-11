@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE CPP #-}
 
 module Plugin.TraceForeignCalls (plugin) where
 
@@ -6,15 +8,23 @@ import Prelude hiding ((<>))
 
 import Control.Monad
 import Data.Either (partitionEithers)
+import Data.Maybe
 
 import GHC
 import GHC.Plugins
 
 import GHC.Builtin.Names
+import GHC.Builtin.Types
+import GHC.Builtin.Types.Prim
 import GHC.Data.Bag
 import GHC.Tc.Types
+import GHC.Tc.Utils.Monad
 import GHC.Types.ForeignCall
+import GHC.Types.SourceFile
 import GHC.Types.SourceText
+import GHC.Platform.Ways
+import qualified GHC.LanguageExtensions as LangExt
+import GHC.Unit.Env
 
 import Plugin.TraceForeignCalls.Instrument
 import Plugin.TraceForeignCalls.Options
@@ -36,6 +46,7 @@ plugin :: Plugin
 plugin = defaultPlugin {
       renamedResultAction = processRenamed
     , pluginRecompile     = purePlugin
+    , driverPlugin = \_ env -> pure $ env { hsc_dflags = xopt_set (hsc_dflags env) LangExt.UnliftedFFITypes }
     }
 
 processRenamed ::
@@ -43,25 +54,35 @@ processRenamed ::
   -> TcGblEnv
   -> HsGroup GhcRn
   -> TcM (TcGblEnv, HsGroup GhcRn)
-processRenamed options tcGblEnv group = do
-    runInstrument options $ (tcGblEnv,) <$> processGroup group
+processRenamed options tcGblEnv group
+    | moduleUnit (tcg_mod tcGblEnv) `elem` [primUnit, bignumUnit] = pure (tcGblEnv, group)
+    | isHsBootOrSig (tcg_src tcGblEnv) = pure (tcGblEnv, group)
+    | otherwise = do
+        df <- getDynFlags
+        hsc <- getTopEnv
+        let haveSeq = if moduleUnit (tcg_mod tcGblEnv) == ghcInternalUnit
+                      then isJust $ lookupHugByModule gHC_INTERNAL_IO (hsc_HUG hsc)
+                      else True
+        runInstrument (sccProfilingEnabled df) options $ (tcGblEnv,) <$> processGroup (ways df `hasWay` WayProf) haveSeq group
 
 {-------------------------------------------------------------------------------
   Binding groups
 -------------------------------------------------------------------------------}
 
-processGroup :: HsGroup GhcRn -> Instrument (HsGroup GhcRn)
-processGroup group@HsGroup{
+processGroup :: Bool -> Bool -> HsGroup GhcRn -> Instrument (HsGroup GhcRn)
+processGroup profiling haveSeq group@HsGroup{
                  hs_fords
                , hs_valds = XValBindsLR (NValBinds bindingGroups sigs)
                } = do
+    traceCCSFI <- whenOption (\opts -> profiling && not (optionsDisableCallStack opts)) mkTraceCCS
     (exports, imports) <- partitionEithers <$> mapM processForeignDecl hs_fords
-    wrappers <- forM imports $ \i -> (i,) <$> mkWrapper i
+    wrappers <- forM imports $ \i -> (i,) <$> mkWrapper (unLoc . fd_name . unLoc <$> traceCCSFI) haveSeq i
     whenOption_ optionsDumpGenerated $ dumpWrappers wrappers
     let (newSigs, newValues) = unzip $ map snd wrappers
     return $ group {
         hs_fords = concat [
             exports
+          , maybeToList traceCCSFI
           , map reconstructForeignDecl imports
           ]
       , hs_valds =
@@ -70,7 +91,7 @@ processGroup group@HsGroup{
               (map trivialBindingGroup newValues ++ bindingGroups)
               (                        newSigs   ++ sigs         )
       }
-processGroup HsGroup{hs_valds = ValBinds{}} =
+processGroup _ _ HsGroup{hs_valds = ValBinds{}} =
     error "impossible (ValBinds is only used before renaming)"
 
 {-------------------------------------------------------------------------------
@@ -91,6 +112,20 @@ data ReplacedForeignImport = ReplacedForeignImport {
     , rfiForeignImport :: ForeignImport GhcRn
     }
 
+mkTraceCCS :: Instrument (LForeignDecl GhcRn)
+mkTraceCCS = do
+  name <- uniqInternalName "traceCCS#"
+  let iou = nlHsAppTy (nlHsTyVar NotPromoted ioTyConName) (nlHsTyVar NotPromoted (tyConName unitTyCon))
+  return $ noLocValue $ ForeignImport
+    { fd_i_ext = noValue
+    , fd_name = noLocValue name
+    , fd_sig_ty = noLocValue
+                $ HsSig noValue (HsOuterImplicit [])
+                $ nlHsFunTy (nlHsTyVar NotPromoted word8PrimTyConName)
+                $ nlHsFunTy (nlHsTyVar NotPromoted (tyConName addrPrimTyCon))
+                $ nlHsFunTy (nlHsTyVar NotPromoted word64PrimTyConName) iou
+    , fd_fi = CImport (L noSrcSpanA NoSourceText) (L noSrcSpanA CCallConv) (L noSrcSpanA PlayRisky) Nothing (CFunction $ StaticTarget NoSourceText (fsLit "traceHeapProfSampleCostCentre") Nothing True)
+    }
 reconstructForeignDecl :: ReplacedForeignImport -> LForeignDecl GhcRn
 reconstructForeignDecl ReplacedForeignImport {
                            rfiSuffixedName
@@ -109,12 +144,15 @@ processForeignDecl ::
   -> Instrument (Either (LForeignDecl GhcRn) ReplacedForeignImport)
 processForeignDecl decl@(L _ ForeignExport{}) =
     return $ Left decl
-processForeignDecl (L _ ForeignImport{
+processForeignDecl decl@(L _ ForeignImport{
                        fd_i_ext  = NoExtField
                      , fd_name   = rfiOriginalName
                      , fd_sig_ty = rfiSigType
                      , fd_fi     = rfiForeignImport
-                     }) = do
+                     })
+    | CImport _ (unLoc -> conv) _ _ _ <- rfiForeignImport
+    , conv == PrimCallConv = return $ Left decl
+    | otherwise = do
     rfiSuffixedName <- renameForeignImport rfiOriginalName
     return $ Right ReplacedForeignImport{
         rfiOriginalName
@@ -160,18 +198,13 @@ renameForeignImport (L l n) = do
         , "_uninstrumented"
         ]
 
-mkWrapper :: ReplacedForeignImport -> Instrument (LSig GhcRn, LHsBind GhcRn)
-mkWrapper rfi@ReplacedForeignImport {
+mkWrapper :: Maybe Name -> Bool -> ReplacedForeignImport -> Instrument (LSig GhcRn, LHsBind GhcRn)
+mkWrapper traceCCS haveSeq rfi@ReplacedForeignImport {
                   rfiOriginalName
                 , rfiSuffixedName
                 , rfiSigType = L _ sigType
                 } = do
-    (args, body)    <- mkWrapperBody rfi
-
-    mHasCallStack :: Maybe (LHsType GhcRn) <-
-      whenOption (not . optionsDisableCallStack) $ do
-        hasCallStack <- findName nameHasCallStack
-        return $ noLocValue $ HsTyVar noValue NotPromoted (noLocValue hasCallStack)
+    (args, body)    <- mkWrapperBody rfi traceCCS haveSeq
 
     return (
         noLocValue $
@@ -181,17 +214,7 @@ mkWrapper rfi@ReplacedForeignImport {
             HsWC {
                 hswc_ext  = []
               , hswc_body = noLocValue $ sigType {
-                    -- Signature as the original import but with HasCallStack
-                    sig_body =
-                      case mHasCallStack of
-                        Nothing ->
-                          sig_body sigType
-                        Just hasCallStack -> noLocValue $
-                          HsQualTy {
-                              hst_xqual = noValue
-                            , hst_ctxt  = noLocValue [hasCallStack]
-                            , hst_body  = sig_body sigType
-                            }
+                    sig_body = sig_body sigType
                   }
               }
       , noLocValue $
@@ -207,8 +230,13 @@ mkWrapper rfi@ReplacedForeignImport {
                               mc_fun        = rfiOriginalName
                             , mc_fixity     = Prefix
                             , mc_strictness = NoSrcStrict
+                            , mc_an = AnnFunRhs NoEpTok [] []
                             }
-                        , m_pats  = map namedVarPat args
+                        , m_pats  =
+#if MIN_VERSION_ghc(9,12,0)
+                            noLocValue $
+#endif
+                            map namedVarPat args
                         , m_grhss = GRHSs {
                               grhssExt        = emptyComments
                             , grhssGRHSs      = map noLocValue [
@@ -230,58 +258,107 @@ mkWrapper rfi@ReplacedForeignImport {
 -- Also returns the arguments to the wrapper
 mkWrapperBody ::
      ReplacedForeignImport
-  -> Instrument ([Name], LHsExpr GhcRn)
-mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} = do
-    traceEventIO <- findName nameTraceEventIO
-    let callTraceEventIO :: LHsExpr GhcRn -> ExprLStmt GhcRn
-        callTraceEventIO arg = noLocValue $
-            BodyStmt
-              noValue
-              (callNamedFn traceEventIO [arg])
-              regularBodyStmt
-              NoSyntaxExprRn
+  -> Maybe Name -> Bool -> Instrument ([Name], LHsExpr GhcRn)
+mkWrapperBody rfi@ReplacedForeignImport {rfiSuffixedName, rfiSigType} mtraceCCS haveSeq = do
+    traceEventHash <- findName nameTraceEventHash
+    let callTraceEvent :: LHsExpr GhcRn -> LHsExpr GhcRn -> LHsExpr GhcRn
+        callTraceEvent arg st = callNamedFn traceEventHash [arg, st]
 
-    evaluate <- findName nameEvaluate
-    let callEvaluate :: LHsExpr GhcRn -> LHsExpr GhcRn
-        callEvaluate arg = callNamedFn evaluate [arg]
+    mseqHash <- if haveSeq then Just <$> findName nameSeq else pure Nothing
 
-    unsafePerformIO <- findName nameUnsafePerformIO
-    let callUnsafePerformIO :: LHsExpr GhcRn -> LHsExpr GhcRn
-        callUnsafePerformIO arg = callNamedFn unsafePerformIO [arg]
+    runRW <- findName nameRunRW
+    let callRunRW :: LHsExpr GhcRn -> LHsExpr GhcRn
+        callRunRW arg = callNamedFn runRW [arg]
+
+    noDuplicate <- findName nameNoDuplicate
+    let callNoDuplicate :: LHsExpr GhcRn -> LHsExpr GhcRn
+        callNoDuplicate arg = callNamedFn noDuplicate [arg]
 
     (args, resultTy) <- uniqArgsFor (sig_body $ unLoc rfiSigType)
     let callUninstrumented :: LHsExpr GhcRn
         callUninstrumented = callLNamedFn rfiSuffixedName (map namedVar args)
 
+    getCurrentCCS <- findName nameGetCurrentCCS
+    let callGetCurrentCCS :: LHsExpr GhcRn -> LHsExpr GhcRn -> LHsExpr GhcRn
+        callGetCurrentCCS arg st = callNamedFn getCurrentCCS [arg, st]
+
+    let zero8Lit = noLocValue $ HsLit noValue $ HsWord8Prim NoSourceText 0
+        zero64Lit = noLocValue $ HsLit noValue $ HsWord64Prim NoSourceText 0
+
+    s              <- uniqInternalName "s"
+    s'             <- uniqInternalName "s'"
+    s''            <- uniqInternalName "s''"
+    s'''           <- uniqInternalName "s'''"
+    f              <- uniqInternalName "f"
+    ccs            <- uniqInternalName "ccs"
+    runTrace       <- uniqInternalName "runTrace"
     result         <- uniqInternalName "result"
+    result'        <- uniqInternalName "result'"
     eventLogCall   <- mkEventLogCall rfi
     eventLogReturn <- mkEventLogReturn rfi
-    let doBlock :: LHsExpr GhcRn
-        doBlock = noLocValue $ HsDo noValue (DoExpr Nothing) $ noLocValue [
-            callTraceEventIO eventLogCall
-          , noLocValue $
-              BindStmt
-                regularBindStmt
-                (namedVarPat result)
-                ( case checkIsIO resultTy of
-                    Just _  -> callUninstrumented
-                    Nothing -> callEvaluate callUninstrumented
-                )
-          , callTraceEventIO eventLogReturn
-          , noLocValue $
-              LastStmt
-                noValue
-                (callNamedFn returnMName [namedVar result])
-                Nothing
-                NoSyntaxExprRn
-          ]
 
-    return (
-        args
-      , case checkIsIO resultTy of
-          Just _  -> doBlock
-          Nothing -> callUnsafePerformIO doBlock
-      )
+    let wrapped = case checkIsIO resultTy of
+            {- case foo of
+                 IO f -> IO (\s -> case f (traceEvent# call s) of
+                                     (# s', result #) -> (# traceEvent# return s', result #))
+                 ---------------------------------------------------------------------------- (traceCCS)
+                 IO f -> IO (\s -> case getCurrentCCS# f (traceEvent# call s) of
+                                     (# s', ccs #) -> case traceCCS 0 ccs 0 of
+                                       IO runTrace -> case runTrace s' of
+                                         (# s'', _ ) -> case f s'' of
+                                           (# s''', result #) -> (# traceEvent# return s''', result #))
+            -}
+            Just _ -> HsCase CaseAlt callUninstrumented
+                    $ mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
+                    $ mkHsCaseAlt (noLocValue $ ConPat noExtField (noLocValue ioDataConName) $ PrefixCon [] [namedVarPat f])
+                    $ mkHsApp (namedVar ioDataConName)
+                    $ mkHsLam (noLocValue [namedVarPat s])
+                    $ noLocValue
+                    $ case mtraceCCS of
+                        Nothing ->
+                            HsCase CaseAlt (mkHsApp (namedVar f) (callTraceEvent eventLogCall $ namedVar s))
+                          $ mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
+                          $ mkHsCaseAlt (noLocValue $ TuplePat noExtField [namedVarPat s', namedVarPat result] Unboxed)
+                          $ noLocValue $ ExplicitTuple noExtField [Present noExtField (callTraceEvent eventLogReturn (namedVar s')), Present noExtField (namedVar result) ] Unboxed
+                        Just traceCCS ->
+                            HsCase CaseAlt (callGetCurrentCCS (namedVar f) (callTraceEvent eventLogCall $ namedVar s))
+                          $ mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
+                          $ mkHsCaseAlt (noLocValue $ TuplePat noExtField [namedVarPat s', namedVarPat ccs] Unboxed)
+                          $ noLocValue $ HsCase CaseAlt (mkHsApp (mkHsApp (mkHsApp (namedVar traceCCS) zero8Lit) (namedVar ccs)) zero64Lit)
+                          $ mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
+                          $ mkHsCaseAlt (noLocValue $ ConPat noExtField (noLocValue ioDataConName) $ PrefixCon [] [namedVarPat runTrace])
+                          $ noLocValue $ HsCase CaseAlt (mkHsApp (namedVar runTrace) (namedVar s'))
+                          $ mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
+                          $ mkHsCaseAlt (noLocValue $ TuplePat noExtField [namedVarPat s'', noLocValue (WildPat noExtField)] Unboxed)
+                          $ noLocValue $ HsCase CaseAlt (mkHsApp (namedVar f) (namedVar s''))
+                          $ mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
+                          $ mkHsCaseAlt (noLocValue $ TuplePat noExtField [namedVarPat s''', namedVarPat result] Unboxed)
+                          $ noLocValue $ ExplicitTuple noExtField [Present noExtField (callTraceEvent eventLogReturn (namedVar s''')), Present noExtField (namedVar result) ] Unboxed
+
+      
+            {- case runRW# (\s -> case seq# foo (traceEvent# call (noDuplicate s)) of
+                     (# s', result #) -> (# traceEvent# return s', result #)) of
+                 (# _ , result' #) -> result'
+            -}
+            Nothing
+              | Just seqHash <- mseqHash
+              , let callSeq arg st = callNamedFn seqHash [arg, st]
+              -> HsCase CaseAlt
+                 ( callRunRW
+                 $ mkHsLam (noLocValue [namedVarPat s])
+                 $ noLocValue
+                 $ HsCase CaseAlt
+                        (callSeq callUninstrumented $ callTraceEvent eventLogCall $ callNoDuplicate $ namedVar s)
+                 $ mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
+                 $ mkHsCaseAlt (noLocValue $ TuplePat noExtField [namedVarPat s', namedVarPat result] Unboxed)
+                 $ noLocValue $ ExplicitTuple noExtField [Present noExtField (callTraceEvent eventLogReturn (namedVar s')), Present noExtField (namedVar result) ] Unboxed
+                 )
+                 ( mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
+                 $ mkHsCaseAlt (noLocValue $ TuplePat noExtField [noLocValue (WildPat noExtField), namedVarPat result'] Unboxed)
+                               (namedVar result'))
+             | otherwise -> unLoc callUninstrumented
+
+    return ( args , noLocValue wrapped )
 
 {-------------------------------------------------------------------------------
   Generate eventlog events
@@ -293,10 +370,10 @@ mkEventLogCall ReplacedForeignImport{
                         rfiOriginalName
                       , rfiForeignImport
                       } = do
-    noCallStack <- asksOption optionsDisableCallStack
+    noCallStack <- pure True -- asksOption optionsDisableCallStack
 
     if noCallStack then
-      return $ stringExpr prefix
+      return $ ubstringExpr prefix
     else do
       callStack        <- findName nameCallStack
       prettyCalllStack <- findName namePrettyCallStack
@@ -341,7 +418,7 @@ mkEventLogCall ReplacedForeignImport{
 -- | Eventlog description for the return of the foreign function
 mkEventLogReturn :: ReplacedForeignImport -> Instrument (LHsExpr GhcRn)
 mkEventLogReturn ReplacedForeignImport{rfiOriginalName} = do
-    return $ stringExpr $ concat [
+    return $ ubstringExpr $ concat [
         "trace-foreign-calls: return "
       , occNameString . nameOccName . unLoc $ rfiOriginalName
       ]
@@ -350,8 +427,13 @@ mkEventLogReturn ReplacedForeignImport{rfiOriginalName} = do
   Auxiliary
 -------------------------------------------------------------------------------}
 
+#if MIN_VERSION_ghc(9,12,0)
+trivialBindingGroup :: LHsBind GhcRn -> (RecFlag,  [LHsBind GhcRn])
+trivialBindingGroup binding = (NonRecursive, [binding])
+#else
 trivialBindingGroup :: LHsBind GhcRn -> (RecFlag, Bag (LHsBind GhcRn))
 trivialBindingGroup binding = (NonRecursive, unitBag binding)
+#endif
 
 uniqInternalName :: String -> Instrument Name
 uniqInternalName n = do
@@ -402,6 +484,10 @@ emptyWhereClause = EmptyLocalBinds noValue
 
 stringExpr :: String -> LHsExpr GhcRn
 stringExpr = noLocValue . HsLit noValue . HsString NoSourceText . fsLit
+
+
+ubstringExpr :: String -> LHsExpr GhcRn
+ubstringExpr = noLocValue . HsLit noValue . mkHsStringPrimLit . fsLit
 
 callLNamedFn :: LIdP GhcRn -> [LHsExpr GhcRn] -> LHsExpr GhcRn
 callLNamedFn fn args = mkHsApps (noLocValue $ HsVar noValue fn) args

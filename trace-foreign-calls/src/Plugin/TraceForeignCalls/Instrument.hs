@@ -44,9 +44,10 @@ liftTcM = Wrap . const
 getTracerEnv :: Instrument TracerEnv
 getTracerEnv = Wrap return
 
-runInstrument :: forall a. [String] -> Instrument a -> TcM a
-runInstrument rawOptions ma = do
-    tracerEnvOptions <- parseOptions rawOptions
+runInstrument :: forall a. Bool -> [String] -> Instrument a -> TcM a
+runInstrument profiled rawOptions ma = do
+    tracerEnvOptions' <- parseOptions rawOptions
+    let tracerEnvOptions = tracerEnvOptions' { optionsDisableCallStack = not profiled || optionsDisableCallStack tracerEnvOptions' }
 
     let tracerEnv :: TracerEnv
         tracerEnv = TracerEnv {
@@ -103,22 +104,26 @@ whenOption_ f = void . whenOption f
 -------------------------------------------------------------------------------}
 
 data Names = Names {
-      nameTraceEventIO    :: TcM Name
-    , nameEvaluate        :: TcM Name
-    , nameUnsafePerformIO :: TcM Name
+      nameTraceEventHash :: TcM Name
+    , nameSeq            :: TcM Name
+    , nameRunRW          :: TcM Name
+    , nameNoDuplicate    :: TcM Name
     , nameHasCallStack    :: TcM Name
     , nameCallStack       :: TcM Name
     , namePrettyCallStack :: TcM Name
+    , nameGetCurrentCCS   :: TcM Name
     }
 
 mkNames :: Names
 mkNames = Names {
-      nameTraceEventIO    = resolveVarName modlTraceEventIO    "traceEventIO"
-    , nameEvaluate        = resolveVarName modlEvaluate        "evaluate"
-    , nameUnsafePerformIO = resolveVarName modlUnsafePerformIO "unsafePerformIO"
+      nameTraceEventHash  = resolveVarName modlTraceEvent      "traceEvent#"
+    , nameSeq             = resolveVarName modlSeq             "seq#"
+    , nameRunRW           = resolveVarName modlRunRW           "runRW#"
+    , nameNoDuplicate     = resolveVarName modlNoDuplicate     "noDuplicate#"
     , nameHasCallStack    = resolveTcName  modlHasCallStack    "HasCallStack"
     , nameCallStack       = resolveVarName modlCallStack       "callStack"
     , namePrettyCallStack = resolveVarName modlPrettyCallStack "prettyCallStack"
+    , nameGetCurrentCCS   = resolveVarName modlGetCurrentCCS   "getCurrentCCS#"
     }
 
 findName :: (Names -> TcM Name) -> Instrument Name
