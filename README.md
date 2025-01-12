@@ -179,7 +179,7 @@ You should then be able to build or run your executable, rebuilding (almost)
 all of its dependencies, with
 
 ```bash
-$ cabal run --project-file cabal.project.plugin <your-exec>
+cabal run --project-file cabal.project.plugin <your-exec>
 ```
 
 ### Upgrading the plugin
@@ -189,6 +189,44 @@ any dependencies (it does not include the hash of the plugin in the hash of the
 packages). So wipe your `cabal-plugin-store` as well as your `dist-newstyle`
 directory each time you update your plugin (another good reason for using a
 separate store for the plugin).
+
+## Enabling the plugin on the GHC boot libraries
+
+If you want to track time spent in foreign calls made in the GHC boot libraries,
+you will need to recompile GHC. Checkout
+
+```
+git clone https://gitlab.haskell.org/edsko/ghc.git \
+  --branch edsko/trace-foreign-calls \
+  ./ghc-trace-foreign-calls
+```
+
+Then in the `ghc-trace-foreign-calls` directory run
+
+```
+git submodule update --init --recursive
+./boot && ./configure
+hadrian/build -j
+```
+
+Use GHC 9.10 as your bootstrap compiler. See
+[Building and Porting GHC](https://gitlab.haskell.org/ghc/ghc/-/wikis/building/#building-and-porting-ghc)
+for all the nitty gritty details about building ghc.
+
+Once built, use the compiler in `_build/stage1/bin` instead of your regular GHC.
+In this case there is no need to separately enable the plugin; just compile with
+this custom build of GHC, and all packages will have `trace-foreign-calls`
+enabled; you might still want to use a custom cabal store, something like
+
+```
+import: cabal.project
+
+package *
+  ghc-options:
+    -package-db=/tmp/cabal-plugin-store/ghc-9.13.20250112/package.db
+
+store-dir: /tmp/cabal-plugin-store
+```
 
 ## The generated wrappers
 
