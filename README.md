@@ -36,7 +36,8 @@ processing the event log yourself or by using
 
 ## Limitations and future work
 
-* Requires GHC 9.12
+* Requires GHC 9.10 or 9.12
+  (profiling of _pure_ foreign imports requires ghc 9.12).
 * Standard time profiling tools can _NOT_ be used on the eventlog.
 * It is not possible to profile Haskell functions and FFI functions at the
   same time.

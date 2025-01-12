@@ -12,7 +12,7 @@ import Data.String
 import GHC
 import GHC.Utils.Outputable
 
-import Plugin.TraceForeignCalls.Util.GHC
+import Plugin.TraceForeignCalls.GHC.Util
 
 {-------------------------------------------------------------------------------
   Definition

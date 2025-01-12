@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns      #-}
+
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 module Plugin.TraceForeignCalls (plugin) where
@@ -20,17 +21,20 @@ import GHC.Tc.Utils.Monad qualified as TC
 import GHC.Types.ForeignCall qualified as Foreign
 import GHC.Types.SourceFile (isHsBootOrSig)
 
+import Plugin.TraceForeignCalls.GHC.Shim
+import Plugin.TraceForeignCalls.GHC.Util
 import Plugin.TraceForeignCalls.Instrument
 import Plugin.TraceForeignCalls.Options
-import Plugin.TraceForeignCalls.Util.GHC
 
 {-------------------------------------------------------------------------------
   Top-level
 
   References:
 
-  - https://downloads.haskell.org/ghc/9.12.1/docs/users_guide/extending_ghc.html#compiler-plugins
+  - https://hackage.haskell.org/package/ghc-9.10.1
   - https://hackage.haskell.org/package/ghc-9.12.1
+
+  - https://downloads.haskell.org/ghc/9.12.1/docs/users_guide/extending_ghc.html#compiler-plugins
   - https://downloads.haskell.org/ghc/9.12.1/docs/users_guide/exts/ffi.html
   - https://www.haskell.org/onlinereport/haskell2010/haskellch8.html
 -------------------------------------------------------------------------------}
@@ -69,7 +73,7 @@ processRenamed options tcGblEnv group
 processGroup :: HsGroup GhcRn -> Instrument (HsGroup GhcRn)
 processGroup  group@HsGroup{
                  hs_fords
-               , hs_valds = XValBindsLR (NValBinds bindingGroups sigs)
+               , hs_valds = existingBindings
                } = do
     mTraceCCS <- findName nameTraceCCS
 
@@ -90,13 +94,11 @@ processGroup  group@HsGroup{
           , map reconstructForeignDecl imports
           ]
       , hs_valds =
-          XValBindsLR $
-            NValBinds
-              (map trivialBindingGroup newValues ++ bindingGroups)
-              (                        newSigs   ++ sigs         )
+          extendValBinds
+            (map trivialBindingGroup newValues)
+            newSigs
+            existingBindings
       }
-processGroup HsGroup{hs_valds = ValBinds{}} =
-    error "impossible (ValBinds is only used before renaming)"
 
 {-------------------------------------------------------------------------------
   Foreign declarations
@@ -256,7 +258,6 @@ renameForeignImport (L l n) = do
 mkWrapper :: ReplacedForeignImport -> Instrument (LSig GhcRn, LHsBind GhcRn)
 mkWrapper rfi@ReplacedForeignImport {
               rfiOriginalName
-            , rfiSuffixedName
             , rfiSigType = L _ sigType
             } = do
     (args, body) <- mkWrapperBody rfi
@@ -272,36 +273,7 @@ mkWrapper rfi@ReplacedForeignImport {
                     sig_body = sig_body sigType
                   }
               }
-      , noLocValue $
-          FunBind {
-               fun_ext     = mkNameSet [unLoc rfiSuffixedName]
-             , fun_id      = rfiOriginalName
-             , fun_matches = MG {
-                   mg_ext  = Generated OtherExpansion SkipPmc
-                 , mg_alts = noLocValue . map noLocValue $ [
-                      Match {
-                          m_ext   = noValue
-                        , m_ctxt  = FunRhs {
-                              mc_fun        = rfiOriginalName
-                            , mc_fixity     = Prefix
-                            , mc_strictness = NoSrcStrict
-                            , mc_an         = AnnFunRhs NoEpTok [] []
-                            }
-                        , m_pats  = noLocValue $ map namedVarPat args
-                        , m_grhss = GRHSs {
-                              grhssExt        = emptyComments
-                            , grhssGRHSs      = map noLocValue [
-                                  GRHS
-                                    noValue
-                                    [] -- guards
-                                    body
-                                ]
-                            , grhssLocalBinds = emptyWhereClause
-                            }
-                        }
-                    ]
-                 }
-            }
+      , mkSimpleFunBind rfiOriginalName [] args body
       )
 
 -- | Make the body for the wrapper
@@ -436,11 +408,8 @@ mkEventLogReturn ReplacedForeignImport{rfiOriginalName} =
       ]
 
 {-------------------------------------------------------------------------------
-  Auxiliary
+  Auxiliary: constructions with fresh names
 -------------------------------------------------------------------------------}
-
-trivialBindingGroup :: LHsBind GhcRn -> (RecFlag,  [LHsBind GhcRn])
-trivialBindingGroup binding = (NonRecursive, [binding])
 
 -- | Create unique name for each argument of the function
 uniqArgsFor :: LHsType GhcRn -> Instrument [Name]
@@ -454,57 +423,6 @@ uniqArgsFor = go [] . unLoc
         go (arg:acc) (unLoc rhs)
     go acc _otherTy =
         return $ reverse acc
-
--- | Check if a function signature returns something in the @IO@ monad
-checkIsIO :: LHsSigType GhcRn -> Bool
-checkIsIO = go . unLoc . sig_body . unLoc
-  where
-    go :: HsType GhcRn -> Bool
-    go HsForAllTy{hst_body} = go (unLoc hst_body)
-    go HsQualTy{hst_body}   = go (unLoc hst_body)
-    go (HsFunTy _ _ _ rhs)  = go (unLoc rhs)
-    go ty =
-        case ty of
-          HsAppTy _ (L _ (HsTyVar _ _ (L _ io))) _ | io == Names.ioTyConName ->
-            True
-          _otherwise ->
-            False
-
-emptyWhereClause :: HsLocalBinds GhcRn
-emptyWhereClause = EmptyLocalBinds noValue
-
-ubstringExpr :: String -> LHsExpr GhcRn
-ubstringExpr = noLocValue . HsLit noValue . mkHsStringPrimLit . fsLit
-
-callLNamedFn :: LIdP GhcRn -> [LHsExpr GhcRn] -> LHsExpr GhcRn
-callLNamedFn fn args =
-    mkHsApps (noLocValue $ HsVar noValue fn) $
-      map mkLHsPar args
-
-callNamedFn :: IdP GhcRn -> [LHsExpr GhcRn] -> LHsExpr GhcRn
-callNamedFn = callLNamedFn . noLocValue
-
-namedLVar :: LIdP GhcRn -> LHsExpr GhcRn
-namedLVar = noLocValue . HsVar noValue
-
-namedVar :: IdP GhcRn -> LHsExpr GhcRn
-namedVar = namedLVar . noLocValue
-
-namedVarPat :: Name -> LPat GhcRn
-namedVarPat = noLocValue . VarPat noValue . noLocValue
-
--- | @IO ()@
-ioUnit :: LHsType GhcRn
-ioUnit =
-    nlHsAppTy
-      (nlHsTyVar NotPromoted Names.ioTyConName)
-      (nlHsTyVar NotPromoted (tyConName unitTyCon))
-
-{-------------------------------------------------------------------------------
-  Auxiliary: construct IO calls
--------------------------------------------------------------------------------}
-
-type RealWorld = LHsExpr GhcRn
 
 -- | Bind to value without evaluating it
 --
@@ -534,10 +452,15 @@ let_ xNameHint e k = do
           }
     return $ noLocValue $
         HsLet noValue (
-          HsValBinds noValue $
-            XValBindsLR $ NValBinds [(NonRecursive, [binding])] []
+            HsValBinds noValue $ mkValBinds [(NonRecursive, [binding])] []
           )
       $ cont
+
+{-------------------------------------------------------------------------------
+  Auxiliary: construct IO calls
+-------------------------------------------------------------------------------}
+
+type RealWorld = LHsExpr GhcRn
 
 -- | Unwrap @IO@ action
 --
@@ -580,7 +503,7 @@ wrapIO f = do
     body <- f (namedVar s)
     return $
         mkHsApp (namedVar Names.ioDataConName)
-      $ mkHsLam (noLocValue [namedVarPat s])
+      $ mkLambda [namedVarPat s]
       $ body
 
 -- | Similar to 'wrapIO', but in a pure context (essentially @unsafePerformIO@)
@@ -599,7 +522,7 @@ runIO f = do
     runRW  <- findName nameRunRW
     noDup  <- findName nameNoDuplicate
     body   <- f $ callNamedFn noDup [namedVar s]
-    let scrut = callNamedFn runRW [mkHsLam (noLocValue [namedVarPat s]) body]
+    let scrut = callNamedFn runRW [mkLambda [namedVarPat s] body]
     return $ noLocValue $
         HsCase CaseAlt scrut
       $ mkMatchGroup (Generated OtherExpansion SkipPmc) . noLocValue . pure
@@ -727,5 +650,4 @@ callNamedIO :: m ~ Instrument
 callNamedIO f args s = do
     fName <- findName f
     return $ callNamedFn fName (args ++ [s])
-
 

@@ -17,7 +17,8 @@ build-type:         Simple
 extra-doc-files:    CHANGELOG.md
 extra-source-files: test-cbits/test_cbits.h
                     test-cbits/test_cbits.c
-tested-with:        GHC ==9.12.1
+tested-with:        GHC ==9.10.1
+                    GHC ==9.12.1
 
 source-repository head
   type:     git
@@ -25,8 +26,8 @@ source-repository head
 
 common lang
   build-depends:
-      -- For now we don't support ghc < 9.12
-      base >= 4.21 && < 4.22
+      -- ghc 9.10 or 9.12
+      base >= 4.20 && < 4.22
   default-language:
       GHC2021
   ghc-options:
@@ -34,7 +35,6 @@ common lang
       -Wredundant-constraints
       -Wprepositive-qualified-module
       -Widentities
-      -Wunused-packages
 
 library
   import:
@@ -44,14 +44,16 @@ library
   other-modules:
       Plugin.TraceForeignCalls.Instrument
       Plugin.TraceForeignCalls.Options
-      Plugin.TraceForeignCalls.Util.GHC
+      Plugin.TraceForeignCalls.GHC.Util
+      Plugin.TraceForeignCalls.GHC.Shim
   hs-source-dirs:
       src
   build-depends:
       -- dependencies intentionally kept at a minimum
       -- (we want to be able to build the boot libs with this plugin)
-    , ghc >= 9.12 && < 9.14
+    , ghc >= 9.10 && < 9.14
     , ghc-boot
+    , ghc-internal
 
 test-suite test-trace-foreign-calls
   import:
