@@ -12,15 +12,14 @@ category:           Development
 build-type:         Simple
 extra-source-files: cbits/cbits.h
                     cbits/cbits.c
-tested-with:        GHC ==9.6.4
-                    GHC ==9.8.2
-                    GHC ==9.10.1
+tested-with:        GHC ==9.12.1
 
 common lang
   ghc-options:
       -Wall
   build-depends:
-      base >= 4.18 && < 4.21
+      -- For now we don't support ghc < 9.12
+      base >= 4.21 && < 4.22
   default-language:
       GHC2021
 

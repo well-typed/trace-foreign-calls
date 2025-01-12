@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Plugin.TraceForeignCalls.Util.GHC (
     -- * Access to 'HscEnv'
@@ -9,6 +10,10 @@ module Plugin.TraceForeignCalls.Util.GHC (
     -- * Names
   , resolveVarName
   , resolveTcName
+  , uniqInternalName
+    -- * Annotations
+  , NoValue(..)
+  , noLocValue
   ) where
 
 import GHC hiding (getNamePprCtx)
@@ -22,6 +27,7 @@ import GHC.Rename.Env
 import GHC.Runtime.Context
 import GHC.Tc.Types
 import GHC.Types.Error
+import GHC.Types.SourceText
 import GHC.Utils.Error
 import GHC.Utils.Logger
 
@@ -73,16 +79,16 @@ printSimpleWarning l doc = do
     liftIO $
       printMessages @DiagnosticMessage
         logger
-        (defaultDiagnosticOpts @DiagnosticMessage)
+        NoDiagnosticOpts
         diagOpts
         (singleMessage $ mkMsgEnvelope diagOpts l namePprCtx diag)
   where
     diag :: DiagnosticMessage
     diag = DiagnosticMessage {
-      diagMessage = mkSimpleDecorated doc
-    , diagReason  = WarningWithoutFlag
-    , diagHints   = []
-    }
+          diagMessage = mkSimpleDecorated $ pprSetDepth AllTheWay doc
+        , diagReason  = WarningWithoutFlag
+        , diagHints   = []
+        }
 
 {-------------------------------------------------------------------------------
   Names
@@ -110,3 +116,50 @@ resolveTcName = resolveName mkTcOcc
 -- | Internal generalization
 resolveName :: (String -> OccName) -> Module -> String -> TcM Name
 resolveName f modl name = lookupOccRn $ Orig modl (f name)
+
+uniqInternalName :: String -> TcM Name
+uniqInternalName n = do
+   resultUniq <- getUniqueM
+   return $ mkInternalName resultUniq (mkVarOcc n) noSrcSpan
+
+{-------------------------------------------------------------------------------
+  Annotations
+-------------------------------------------------------------------------------}
+
+class NoValue a where
+  -- | Value that provides no additional information
+  noValue :: a
+
+noLocValue :: NoValue l => e -> GenLocated l e
+noLocValue = L noValue
+
+instance (NoValue l, NoValue e) => NoValue (GenLocated l e) where
+  noValue = noLocValue noValue
+
+instance NoValue NoExtField where
+  noValue = NoExtField
+
+instance NoValue SrcSpan where
+  noValue = noSrcSpan
+
+instance NoValue SourceText where
+  noValue = NoSourceText
+
+instance NoValue EpAnnComments where
+  noValue = emptyComments
+
+instance NoValue (AnnSortKey tag) where
+  noValue = NoAnnSortKey
+
+instance (XNoMultAnn pass ~ ann, NoValue ann) => NoValue (HsMultAnn pass) where
+  noValue = HsNoMultAnn noValue
+
+instance NoAnn ann => NoValue (EpAnn ann) where
+  noValue = noAnn
+
+instance NoValue AnnSig where
+  noValue = noAnn
+
+instance NoValue EpaLocation where
+  noValue = noAnn
+
