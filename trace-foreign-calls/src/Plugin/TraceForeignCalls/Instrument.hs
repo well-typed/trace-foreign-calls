@@ -13,20 +13,18 @@ module Plugin.TraceForeignCalls.Instrument (
 
 import Control.Monad
 import Control.Monad.IO.Class
-import Data.Maybe (isJust)
 
 import GHC
 import GHC.Plugins hiding (getHscEnv)
 
-import GHC.Builtin.Names qualified as Names
 import GHC.Platform.Ways (Way(WayProf), hasWay)
 import GHC.Tc.Utils.Monad (TcM, TcGblEnv)
 import GHC.Tc.Utils.Monad qualified as TC
-import GHC.Unit.Env (lookupHugByModule)
 import GHC.Utils.Logger (HasLogger(..))
 
+import Plugin.TraceForeignCalls.GHC.Util
+import Plugin.TraceForeignCalls.GHC.Shim
 import Plugin.TraceForeignCalls.Options
-import Plugin.TraceForeignCalls.Util.GHC
 
 {-------------------------------------------------------------------------------
   Definition
@@ -174,12 +172,6 @@ mkNames tcGblEnv = do
 
 findName :: (Names -> a) -> Instrument a
 findName f = Wrap $ return . f . tracerEnvNames
-
-checkHaveSeq :: TcGblEnv -> HscEnv -> Bool
-checkHaveSeq tcGblEnv hsc =
-    if moduleUnit (TC.tcg_mod tcGblEnv) == ghcInternalUnit
-      then isJust $ lookupHugByModule Names.gHC_INTERNAL_IO (hsc_HUG hsc)
-      else True
 
 checkProfiling :: DynFlags -> Bool
 checkProfiling df = sccProfilingEnabled df && ways df `hasWay` WayProf

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Plugin.TraceForeignCalls.Util.GHC (
+module Plugin.TraceForeignCalls.GHC.Util (
     -- * Access to 'HscEnv'
     HasHscEnv(..)
     -- * Errors and warnings
@@ -14,11 +14,23 @@ module Plugin.TraceForeignCalls.Util.GHC (
     -- * Annotations
   , NoValue(..)
   , noLocValue
+    -- * Helpers for constructing bits of the AST
+  , trivialBindingGroup
+  , checkIsIO
+  , emptyWhereClause
+  , ubstringExpr
+  , callLNamedFn
+  , callNamedFn
+  , namedLVar
+  , namedVar
+  , namedVarPat
+  , ioUnit
   ) where
 
 import GHC hiding (getNamePprCtx)
 import GHC.Plugins hiding (getNamePprCtx, getHscEnv)
 
+import GHC.Builtin.Names qualified as Names
 import GHC.Data.IOEnv
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Errors
@@ -163,3 +175,54 @@ instance NoValue AnnSig where
 instance NoValue EpaLocation where
   noValue = noAnn
 
+{-------------------------------------------------------------------------------
+  Helpers for constructing bits of the AST
+-------------------------------------------------------------------------------}
+
+trivialBindingGroup :: LHsBind GhcRn -> (RecFlag,  [LHsBind GhcRn])
+trivialBindingGroup binding = (NonRecursive, [binding])
+
+-- | Check if a function signature returns something in the @IO@ monad
+checkIsIO :: LHsSigType GhcRn -> Bool
+checkIsIO = go . unLoc . sig_body . unLoc
+  where
+    go :: HsType GhcRn -> Bool
+    go HsForAllTy{hst_body} = go (unLoc hst_body)
+    go HsQualTy{hst_body}   = go (unLoc hst_body)
+    go (HsFunTy _ _ _ rhs)  = go (unLoc rhs)
+    go ty =
+        case ty of
+          HsAppTy _ (L _ (HsTyVar _ _ (L _ io))) _ | io == Names.ioTyConName ->
+            True
+          _otherwise ->
+            False
+
+emptyWhereClause :: HsLocalBinds GhcRn
+emptyWhereClause = EmptyLocalBinds noValue
+
+ubstringExpr :: String -> LHsExpr GhcRn
+ubstringExpr = noLocValue . HsLit noValue . mkHsStringPrimLit . fsLit
+
+callLNamedFn :: LIdP GhcRn -> [LHsExpr GhcRn] -> LHsExpr GhcRn
+callLNamedFn fn args =
+    mkHsApps (noLocValue $ HsVar noValue fn) $
+      map mkLHsPar args
+
+callNamedFn :: IdP GhcRn -> [LHsExpr GhcRn] -> LHsExpr GhcRn
+callNamedFn = callLNamedFn . noLocValue
+
+namedLVar :: LIdP GhcRn -> LHsExpr GhcRn
+namedLVar = noLocValue . HsVar noValue
+
+namedVar :: IdP GhcRn -> LHsExpr GhcRn
+namedVar = namedLVar . noLocValue
+
+namedVarPat :: Name -> LPat GhcRn
+namedVarPat = noLocValue . VarPat noValue . noLocValue
+
+-- | @IO ()@
+ioUnit :: LHsType GhcRn
+ioUnit =
+    nlHsAppTy
+      (nlHsTyVar NotPromoted Names.ioTyConName)
+      (nlHsTyVar NotPromoted (tyConName unitTyCon))
