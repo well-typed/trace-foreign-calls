@@ -10,7 +10,7 @@ description:        The eventlog records when foreign calls are made, but does
                     information about the function.
 license:            BSD-3-Clause
 license-file:       LICENSE
-author:             Edsko de Vries
+author:             Edsko de Vries, Zubin Duggal
 maintainer:         edsko@well-typed.com
 category:           Development
 build-type:         Simple
