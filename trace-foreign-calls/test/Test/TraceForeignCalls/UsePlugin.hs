@@ -13,11 +13,11 @@ module Test.TraceForeignCalls.UsePlugin (
 
 import Foreign.C
 
-foreign import capi "test_cbits.h answer"   c_answerIO   :: IO CInt
-foreign import capi "test_cbits.h answer"   c_answerPure ::    CInt
+foreign import capi unsafe "test_cbits.h answer"   c_answerIO   :: IO CInt
+foreign import capi unsafe "test_cbits.h answer"   c_answerPure ::    CInt
 
-foreign import capi "test_cbits.h slow_add" c_slowAddIO   :: CLong -> CLong -> IO CLong
-foreign import capi "test_cbits.h slow_add" c_slowAddPure :: CLong -> CLong ->    CLong
+foreign import capi unsafe "test_cbits.h slow_add" c_slowAddIO   :: CLong -> CLong -> IO CLong
+foreign import capi unsafe "test_cbits.h slow_add" c_slowAddPure :: CLong -> CLong ->    CLong
 
 answerIO :: IO Int
 answerIO = fromIntegral <$> c_answerIO
