@@ -62,7 +62,7 @@ test-suite test-trace-foreign-calls
       exitcode-stdio-1.0
   ghc-options:
       -threaded
-      "-with-rtsopts -l -N"
+      "-with-rtsopts -l -N2"
   cc-options:
       -O0
   hs-source-dirs:
@@ -81,7 +81,5 @@ test-suite test-trace-foreign-calls
   build-depends:
       -- external dependencies
     , async
-    , tasty
-    , tasty-hunit
 
 
